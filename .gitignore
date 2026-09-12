@@ -1,0 +1,10 @@
+# Model weights are never committed - fetch them with ./install.sh
+models/
+*.gguf
+*.safetensors
+*.log
+*.pid
+run/
+outputs/
+.DS_Store
+__pycache__/

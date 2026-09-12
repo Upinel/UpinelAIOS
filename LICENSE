@@ -1,0 +1,38 @@
+MIT License
+
+Copyright (c) 2026 Upinel contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+---
+
+## Third-party notices
+
+This repository contains installation glue and documentation only. It does not
+vendor or redistribute any third-party software or model weights; `install.sh`
+downloads them from their upstream sources, which remain governed by their own
+licences.
+
+- [llama.cpp](https://github.com/ggml-org/llama.cpp) - MIT. The inference runtime.
+- [Gemma 4](https://ai.google.dev/gemma) - Google's model, Apache-2.0.
+- HauhauCS uncensored Gemma 4 fine-tunes - Apache-2.0 per the upstream cards.
+
+The default model is an uncensored fine-tune. It will comply with requests that
+a safety-tuned model would refuse. You are responsible for what you serve and to
+whom, and for the security of the LAN endpoint this bundle exposes.
