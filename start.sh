@@ -135,6 +135,20 @@ ARGS+=( --chat-template-kwargs "$(thinking_kwargs)" )
 
 mkdir -p "$RUN_DIR"
 
+# Tool-call reliability. Gemma follows a schema's semantics but not its
+# `required` list, so agent harnesses see "missing required property" on fields
+# the model judged optional. Generating a template that names each tool's
+# required fields fixes it server-side. See lib/tools-template.py.
+if (( TOOL_TEMPLATE )); then
+  if python3 "$REPO_DIR/lib/tools-template.py" --gguf "$MAIN_GGUF" \
+       --out "$RUN_DIR/tools-template.jinja" 2>>"$RUN_DIR/template.err"; then
+    ARGS+=( --chat-template-file "$RUN_DIR/tools-template.jinja" )
+  else
+    log "  note: tool template unavailable, using the model's stock template"
+    log "        (see $RUN_DIR/template.err)"
+  fi
+fi
+
 if (( PRINT_ONLY )); then
   log "llama-server \\"
   printf '  %s \\\n' "${ARGS[@]}"

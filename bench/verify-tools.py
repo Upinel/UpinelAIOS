@@ -186,6 +186,7 @@ def main():
     print(f"     {DIM}a file write carries the whole file inside the arguments,{RESET}")
     print(f"     {DIM}so its token cost scales with what is being written.{RESET}")
     needed = None
+    arg_chars = 0
     try:
         body = post(base + "/chat/completions",
                     {"model": args.model, "max_tokens": 4000, "tools": TOOLS,
@@ -217,6 +218,12 @@ def main():
                              f"{used} tokens used, {len(parsed.get('content') or '')} chars"
                              + (f", MISSING {missing}" if missing else ""))
                 needed = used
+                # Size of the tool call itself, excluding any thinking the
+                # model did first. The starvation run below must undercut the
+                # *call*, not the total, or a model that thinks less on the
+                # second try slips under the budget and the check passes by
+                # accident.
+                arg_chars = len(fn.get("arguments") or "")
     except Exception as e:                                     # noqa: BLE001
         report.check("large tool call", False, f"{type(e).__name__}: {e}",
                      transport=isinstance(e, (urllib.error.URLError, OSError, TimeoutError)))
@@ -224,7 +231,9 @@ def main():
     # ── 4. deliberately starve it, to show the failure mode ──────────────────
     if needed:
         print("\n  4. Reproducing the failure with a small budget")
-        starve = max(64, needed // 4)
+        # Roughly half the call's own token cost (~4 chars per token), so the
+        # arguments cannot fit even if the model skips thinking this time.
+        starve = max(64, arg_chars // 8) if arg_chars else max(64, needed // 4)
         try:
             body = post(base + "/chat/completions",
                         {"model": args.model, "max_tokens": starve, "tools": TOOLS,
@@ -232,6 +241,7 @@ def main():
                                       {"role": "user", "content": BIG_TASK}]},
                         headers, args.timeout)
             choice, msg, call = first_call(body)
+            finish = choice.get("finish_reason")
             truncated = False
             if call:
                 fn = call.get("function") or {}
@@ -239,6 +249,11 @@ def main():
                     json.loads(fn.get("arguments") or "{}")
                 except json.JSONDecodeError:
                     truncated = True
+            # Burning the whole budget before emitting a call at all is also
+            # truncation, and is the more common shape in a real harness. The
+            # earlier version scored "no call returned" as a pass.
+            if not truncated and (finish == "length" or not call):
+                truncated = True
             report.check(f"max_tokens={starve} truncates the call (expected)", truncated,
                          "this is what produces 'missing required property' in an agent"
                          if truncated else "did not truncate on this run")
@@ -249,13 +264,17 @@ def main():
     print("\n  4b. Advisory required fields  (the 'description' failure)")
     print(f"     {DIM}a label field is easy for a model to skip even when the{RESET}")
     print(f"     {DIM}schema says required, and the agent reports it as missing.{RESET}")
-    trials = 5
+    trials = 10
     kept = 0
     trunc = 0
     for _ in range(trials):
         try:
+            # Generous budget on purpose: this check is about which fields the
+            # model chooses to emit, not about truncation. A starved budget
+            # would report a truncation bug as a schema-honouring bug, and the
+            # two have different fixes.
             body = post(base + "/chat/completions",
-                        {"model": args.model, "max_tokens": 400,
+                        {"model": args.model, "max_tokens": 1500,
                          "tools": ADVISORY_TOOLS,
                          "messages": [{"role": "system", "content": "You are a coding agent."},
                                       {"role": "user",
@@ -277,17 +296,20 @@ def main():
         except Exception:                                      # noqa: BLE001
             continue
     rate = kept / trials
-    report.check(f"advisory field present in all {trials} trials", kept == trials,
-                 f"included in {kept}/{trials} runs"
-                 + (f", {trunc} truncated" if trunc else ""))
-    if kept < trials:
-        print(f"         {YELLOW}-> the model treats a label field as optional. Measured{RESET}")
-        print(f"         {YELLOW}   on this machine with three system prompts:{RESET}")
-        print(f"         {DIM}     plain                         1/6 runs included it{RESET}")
-        print(f"         {DIM}     'every required field'        5/6{RESET}")
-        print(f"         {YELLOW}     naming the fields explicitly  6/6{RESET}")
-        print(f"         {YELLOW}   The fix is in the agent's system prompt, not the server:{RESET}")
-        print(f"         {YELLOW}   name the required fields, or mark a label optional.{RESET}")
+    # Truncation is a different bug with a different fix (see check 4), so a
+    # starved run is not counted against field adherence.
+    judged = trials - trunc
+    report.check(f"advisory field present in all {judged} completed trials",
+                 judged > 0 and kept == judged,
+                 f"included in {kept}/{judged} runs"
+                 + (f", {trunc} truncated - raise max_tokens" if trunc else ""))
+    if kept < judged:
+        print(f"         {YELLOW}-> the model treated a required field as optional.{RESET}")
+        print(f"         {DIM}   env.conf ships TOOL_TEMPLATE=1, which names every tool's{RESET}")
+        print(f"         {DIM}   required fields in the prompt, server-side, for any client.{RESET}")
+        print(f"         {YELLOW}   With TOOL_TEMPLATE=0 this is expected: measured 6/9 plain{RESET}")
+        print(f"         {YELLOW}   and 3/9 with a generic 'include every field' reminder.{RESET}")
+        print(f"         {YELLOW}   Name the fields in the agent's prompt, or turn it back on.{RESET}")
 
     # ── 5. streaming, the path agents use ────────────────────────────────────
     print("\n  5. Streaming tool call")

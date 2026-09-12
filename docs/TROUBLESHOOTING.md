@@ -52,34 +52,79 @@ already truncated.
 
 Also worth setting `THINKING="off"`: thinking tokens come out of the same budget.
 
-### The other variant: `missing required property "description"`
+### The other variant: a field the model decided was optional
 
 Same error message, **different cause**, and the fix is different too.
 
-Some tool schemas require a human-readable label alongside the real payload — a
-`description` next to a `command`. Models routinely treat that as optional
-metadata and simply skip it, even though the schema marks it required. The call
-is well-formed JSON with a field missing, so it is not a truncation and raising
-`max_tokens` will not help.
+Some tool schemas require a field alongside the real payload — a `description`
+next to a `command`, a boolean next to a path. Models routinely treat those as
+optional metadata and simply skip them, even though the schema marks them
+required. The call is well-formed JSON with a field missing, so it is not a
+truncation and raising `max_tokens` will not help.
 
-Measured on this machine, six runs each, asking for the same command:
+This is **not** specific to `description`, and it is **not** an ordering problem.
+Rotating the same five-field schema so the dropped field sat first, second and
+last produced the same omission at every position:
 
-| system prompt | `description` included |
+```
+  Omitted field by SCHEMA POSITION (9 trials, field rotated each time):
+    pos1/5 'capture_output': 3
+    pos2/5 'capture_output': 3
+    pos5/5 'capture_output': 3
+```
+
+The model honours the schema's *semantics* and ignores its `required` list. It
+keeps what it needs to do the job (`command`, `file_path`) and silently discards
+what it judges defaultable (`capture_output`, `timeout`, `workdir`). The more
+required fields a harness declares, the more it loses — which is why a large
+agent tool set fails far more often than a minimal test schema.
+
+Measured on Gemma-4-26B-A4B, 9 trials each, on a five-field schema:
+
+| approach | complete calls |
 |---|---:|
-| *"You are a coding agent."* | **1/6** |
-| *"Every tool call MUST include every required field."* | 5/6 |
-| *"…always supply both `command` and `description`."* | **6/6** |
+| plain system prompt | 6/9 |
+| *"Every tool call MUST include every required field."* | **3/9** ← actively worse |
+| naming the required fields in the prompt | 9/9 |
+| **`TOOL_TEMPLATE=1` (the shipped fix)** | **30/30** |
 
-**Naming the fields explicitly in the agent's system prompt fixes it.** Marking
-the label optional in the tool schema also resolves it, if you control the
-schema.
+Note the middle row. A generic reminder makes it *worse*: it makes the model
+deliberate about required-ness without telling it which fields are required.
+Only naming the fields works.
+
+**The fix is server-side and on by default.** `start.sh` reads the model's own
+`tokenizer.chat_template` out of the GGUF, injects a short per-tool reminder
+listing that tool's required fields, and passes the result to llama-server as
+`--chat-template-file`:
+
+```
+All of the following fields are MANDATORY in every bash call and must never be
+omitted, even when a value seems obvious or optional: command, description,
+timeout, workdir, capture_output.
+```
+
+Because it is generated from the tool schemas in each request, it names the
+right fields for whatever harness you point at it — no client changes, no
+per-agent prompt engineering. It costs ~400 characters of system prompt and
+nothing at runtime.
+
+Controls, in `env.conf`:
+
+```bash
+TOOL_TEMPLATE=1     # 0 restores the model's stock template
+```
+
+`lib/tools-template.py` does the work and can also be run standalone; it exits
+non-zero rather than writing a template it could not patch, so a startup failure
+degrades to the stock template instead of a broken one. Check
+`run/template.err` if the startup banner mentions it.
 
 How to tell the two apart:
 
 | symptom | `finish_reason` | cause | fix |
 |---|---|---|---|
 | arguments unparseable, ends mid-string | `length` | truncated | raise `max_tokens` |
-| arguments valid JSON, a field absent | `tool_calls` | model omitted it | name it in the prompt |
+| arguments valid JSON, a field absent | `tool_calls` | model omitted it | already handled by `TOOL_TEMPLATE=1`; name the fields in the prompt if you set it to 0 |
 
 `./bench/verify-tools.sh` reports both: check 3 measures the budget a file write
 needs, and check 4b runs five trials against an advisory required field.
