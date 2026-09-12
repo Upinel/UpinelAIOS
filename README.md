@@ -156,6 +156,31 @@ free even for text-only requests:
 Three repeats each, same model. Set `ENABLE_VISION=1` when you actually need
 images; text quality is identical either way.
 
+## Agents that write files
+
+If your agent reports **`invalid arguments: missing required property "file_path"`**,
+it is almost certainly a truncated tool call, not a broken schema — and the
+diagnostic measures the number instead of guessing:
+
+```bash
+./bench/verify-tools.sh
+```
+
+A file write carries the **whole file inside the tool call's arguments**. On the
+reference machine a 1,467-character Python file cost **538 tokens** of arguments.
+If the client's `max_tokens` is smaller, the JSON is cut off mid-string, the
+agent sees an incomplete object, and reports the first required property it
+cannot find.
+
+| what the agent writes | budget to allow |
+|---|---:|
+| a one-line file | 512 |
+| a short script | 2048 |
+| a full module | 4096 |
+
+`MAX_RESPONSE_TOKENS` is the server's ceiling, not a floor — it cannot rescue a
+call the client already truncated. See [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
+
 ## Thinking
 
 ```conf
@@ -172,8 +197,8 @@ Measured on "reply with exactly: endpoint ok":
 **llama.cpp cannot cap thinking.** Unlike MTPLX there is no token budget here —
 the setting only turns the thinking block on or off through the chat template.
 So `minimal`, `low` and `high` all behave as "on", and **`off` is the only
-setting that actually reduces thinking**. Use it for agent and tool work; it is
-the cheapest large win available.
+setting that actually reduces thinking**. It is the default for that reason, and
+it frees budget for tool calls, which share the same allowance.
 
 ## Quick start
 
@@ -203,6 +228,7 @@ fine-tune.** There is no point being fast at something that will not answer.
 | `e4b` | 6 GB | `HauhauCS/Gemma-4-E4B-Uncensored-HauhauCS-Aggressive` — middle, and loses on both counts |
 
 ```bash
+./bench/verify-tools.sh            # check tool calling, measure a file write
 ./model_download.sh                # what is available, what you have
 ./model_download.sh 12b            # download one
 ./model_download.sh --switch 12b   # download if needed, switch, restart

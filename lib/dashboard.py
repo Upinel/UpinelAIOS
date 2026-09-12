@@ -776,9 +776,10 @@ class Dashboard:
         self.pending = Pending()
         self.status_note = ""        # one-line feedback under the panels
         self.status_note_until = 0.0
-        self.levels = ["off", "minimal", "low", "medium", "high"]
+        self.levels = ["off", "minimal", "low", "high"]
         self._cached_thinking = None
         self._thinking_checked = 0.0
+        self._pending_thinking = None
         self._health_cache = None
         self._props_cache = None
         self._switching_to = None
@@ -853,27 +854,50 @@ class Dashboard:
         self.status_note_until = time.time() + seconds
 
     def current_thinking(self):
-        """The server's live setting, which may differ from env.conf."""
-        try:
-            data = json.loads(self.server.live_settings() or "{}")
-        except (json.JSONDecodeError, TypeError):
-            return None
-        mode = data.get("reasoning")
-        if mode == "off":
-            return "off"
-        return data.get("reasoning_effort") or "minimal"
+        """
+        The configured thinking level.
+
+        Unlike MTPLX, llama.cpp has no live settings endpoint: thinking is a
+        chat-template kwarg handed to the server at launch, so env.conf is the
+        source of truth and changing it needs a restart.
+        """
+        level = self._pending_thinking or self.cfg.get("thinking", "minimal")
+        return level if level in self.levels else "minimal"
 
     def apply_thinking(self, level):
-        payload = self.server.set_thinking(level)
-        if payload is None:
-            self.note(f"{RED}Could not change thinking - see run/server.log{RESET}", 6)
+        """
+        Write the level to env.conf and restart.
+
+        llama.cpp reads chat-template kwargs at launch, so there is no live
+        path here - the honest behaviour is to persist the choice and reload,
+        which is what ./status.sh --thinking does from the command line too.
+        """
+        env_file = self.cfg.get("env_file")
+        repo_dir = self.cfg.get("repo_dir")
+        if not env_file or not repo_dir:
+            self.note(f"{RED}Cannot change thinking: env.conf path unknown{RESET}", 6)
             return
-        # Update the footer immediately rather than waiting for the next
-        # periodic refresh, which only runs every few seconds.
-        self._cached_thinking = level
-        self._thinking_checked = time.time()
+        try:
+            src = open(env_file).read()
+            src, n = re.subn(r'^THINKING=.*$', f'THINKING="{level}"', src,
+                             count=1, flags=re.M)
+            if n != 1:
+                raise OSError("THINKING= not found in env.conf")
+            open(env_file, "w").write(src)
+        except OSError as exc:
+            self.note(f"{RED}Could not write env.conf: {exc}{RESET}", 8)
+            return
+        self._pending_thinking = level
+        self.cfg["thinking"] = level
+        try:
+            subprocess.Popen([os.path.join(repo_dir, "restart.sh")],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                             stdin=subprocess.DEVNULL, start_new_session=True)
+        except OSError as exc:
+            self.note(f"{RED}Could not restart: {exc}{RESET}", 8)
+            return
         self.note(f"{GREEN}thinking -> {level}{RESET}  "
-                  f"{DIM}(live only; set THINKING in env.conf to persist){RESET}", 6)
+                  f"{DIM}reloading to apply{RESET}", 12)
 
     def apply_model(self, repo):
         """
@@ -1111,10 +1135,7 @@ class Dashboard:
         """What thinking is actually set to right now, not what env.conf says."""
         if self.pending.kind == "thinking":
             return self.pending.value
-        live = self._cached_thinking
-        if live:
-            return live
-        return self.cfg.get("thinking", "?")
+        return self.current_thinking()
 
     def _header_lines(self):
         """Header line count, used to size everything else."""
