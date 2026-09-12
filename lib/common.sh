@@ -301,13 +301,29 @@ print("" if best is None else int(best))
 PY
 }
 
-# Depth actually used: MTP_DEPTH="auto" means "the tuned value, else 1".
-# 1 is the measured optimum for the 26b-a4b at agent context lengths; deeper
-# drafting peaks on short prompts and collapses past ~8k.
+# Depth actually used: MTP_DEPTH="auto" means "the tuned value, else 3".
+#
+# 3, not 1. Measured on an M5 Pro against realistic code generation, depth 3
+# beats depth 1 at every context length and never falls behind:
+#
+#     context    depth 1    depth 3
+#     -------    -------    -------
+#       2k        65 t/s     82 t/s     +27%
+#       8k        46 t/s     48 t/s      +5%
+#      16k        40 t/s     39 t/s      ~0%
+#
+# Draft acceptance does fall with depth (91% at depth 1, 78% at depth 3), which
+# is why this was previously set to 1. But acceptance is not the metric that
+# matters - tokens per second is, and accepting two extra tokens 78% of the
+# time still beats accepting one 91% of the time.
+#
+# Beware of measuring this with a trivially predictable prompt. Counting to
+# 200 pins acceptance at 100% for every depth and makes deep drafting look far
+# better than it is. Use bench/sweep.py --ask code.
 effective_depth() {
   if [[ "${MTP_DEPTH}" == "auto" ]]; then
     local d; d="$(tuned_depth)"
-    echo "${d:-1}"
+    echo "${d:-3}"
   else
     echo "$MTP_DEPTH"
   fi

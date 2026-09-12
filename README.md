@@ -102,46 +102,134 @@ roughly a quarter of an M5 Pro's bandwidth:
 Treat those as order-of-magnitude. Even the pessimistic end is a usable agent
 endpoint, and `e2b` at 4.2 GB is the right pick for an 8 GB Air.
 
-## Measured throughput
+### How speed scales with context
 
-**M5 Pro (20-core GPU, 64 GB), uncensored Gemma 4 26B-A4B, speculative depth 1:**
+**M5 Pro (20-core GPU, 64 GB), uncensored Gemma 4 26B-A4B**, shipped settings
+(`MTP_DEPTH=3`, `THINKING=off`). Decode is the rate once generating; prefill is
+the rate ingesting the prompt, and it is what time-to-first-token is made of.
 
-| context | decode | prefill |
-|---:|---:|---:|
-| 512 | **88 t/s** | 7,500–10,000 t/s |
-| 8,192 | **66 t/s** | ~1,200 t/s |
-| 32,768 | ~39–50 t/s | ~690 t/s |
-| 131,072 | possible | **~136 t/s** — see the warning below |
+| context | decode | prefill | TTFT, cold | TTFT, warm |
+|---:|---:|---:|---:|---:|
+| 2k | 59 t/s | 1,058 t/s | 2.3 s | **0.35 s** |
+| 8k | 53 t/s | 860 t/s | 8.9 s | **0.41 s** |
+| 32k | **25 t/s** | 461 t/s | **63 s** | **0.68 s** |
 
 The model is a mixture of experts: 26B total but only about **4B active per
-token**, which is why it is both fast and small. Nothing else here changes the
-order of magnitude.
+token**, which is why it is both fast and small.
 
-> **Long-context warning, measured.** Prefill degrades sharply with context —
-> from ~1,200 t/s at 8k to **~136 t/s at 131k**, i.e. about 16 minutes to ingest
-> one full-context prompt. The default is 128K because it is a *capability*, not
-> because every request will use it. Keep agent contexts under ~32k where the
-> speed is, and let prompt caching do the rest.
+The two right-hand columns are the ones that matter for an agent. A multi-turn
+agent re-sends its whole growing history every turn; because the server reuses
+that prefix from the KV cache, only the new tokens cost anything. Turn 2 of an
+8k conversation returns in **0.41 s** where the cold first turn took **8.9 s** —
+so the expensive event is the first turn of a session, not the twentieth.
+
+> **Cold prefill is the real long-context cost, measured.** At 32k the first
+> turn waits **63 seconds** before the first token. Prefill is architectural
+> here, not tunable: at 32k it sits at ~420 t/s whether batches are 512 or
+> 2048, because five of the thirty layers are full-attention and get
+> quadratically more expensive with context (the other 25 use a 1024-token
+> sliding window). Keep agent contexts under ~32k where the speed is, and let
+> KV reuse carry the rest.
 
 ## Speculative depth — the one speed knob that matters
 
 Gemma 4 ships a small companion drafter. It is a real win here, unlike the MTP
-heads on the Qwen side. Measured on the reference machine:
+heads on the Qwen side. **Depth 3 is the default.**
 
-| depth | 512 ctx | 8k ctx |
-|---:|---:|---:|
-| 0 (off) | 70 t/s | 65 t/s |
-| **1** | **83 t/s** | **76 t/s** |
-| 2 | 84 t/s | 75 t/s |
-| 3 | 93 t/s | 66 t/s |
-| 4 | 75 t/s | 66 t/s |
+Measured two ways. First greedy, on a counting task, best of two samples:
 
-Depth 3 peaks on short prompts and **collapses past ~8k**. Since agents live at
-long context, **depth 1 is the default**. `MTP_DEPTH="auto"` uses a per-model
-tuned value written by `./bench/bench.sh --tune`.
+| depth | 2k ctx | 8k ctx | 16k ctx |
+|---:|---:|---:|---:|
+| 0 (off) | 62 t/s | 43 t/s | 36 t/s |
+| 1 | 82 t/s | 58 t/s | 44 t/s |
+| 2 | 89 t/s | 50 t/s | 42 t/s |
+| **3** | **100 t/s** | **59 t/s** | **47 t/s** |
+| 4 | 103 t/s | 55 t/s | 44 t/s |
+
+That test is too kind to deep drafting — counting to 200 pins draft acceptance
+at 100%. Repeating it against **realistic code generation**, interleaved A/B so
+thermal drift hits both sides equally:
+
+| ctx | depth 1 | depth 3 | acceptance 1 / 3 |
+|---:|---:|---:|---:|
+| 2k | 65 t/s | **82 t/s** (+27%) | 91% / 78% |
+| 8k | 46 t/s | **48 t/s** (+5%) | 91% / 80% |
+| 16k | 40 t/s | 39 t/s (~0%) | 91% / 78% |
+
+**Depth 3 wins or ties everywhere.** Acceptance does fall with depth, which is
+why this used to default to 1 — but acceptance is not the metric. Accepting two
+extra tokens 78% of the time beats accepting one 91% of the time. The old claim
+that depth 3 "collapses past ~8k" does not reproduce; at 8k it is 48 against 46.
+
+`MTP_DEPTH="auto"` uses a per-model tuned value written by
+`./bench/bench.sh --tune`, falling back to 3. `MTP_DEPTH=0` disables speculation.
 
 ngram-based speculation was also measured and **rejected** — it was slower than
 plain autoregressive (65 t/s against 70) on this workload.
+
+## Thinking is on or off, and "off" is 3x faster per turn
+
+llama.cpp cannot cap thinking, so `minimal`, `low` and `high` all emit exactly
+`{"enable_thinking":true}` — the names are labels, not gradations. Only `off`
+changes anything.
+
+That makes it the biggest lever on agent turn latency. Five agent tasks,
+completion tokens per turn:
+
+| | tokens/turn |
+|---|---:|
+| `THINKING=off` (default) | **19** |
+| `THINKING=minimal` | 58 |
+
+Three times the tokens is three times the wait, because a tool call is small
+and thinking is not. On ten single-turn tool-selection tasks, thinking scored
+6/10 against no-thinking's 5/10 — within noise. That covers tool *selection*
+only; if you run multi-step planning or debugging, try `minimal` and compare on
+your own work.
+
+## Measuring this yourself
+
+Two tools, because the honest number for an agent is not the number a
+throughput benchmark gives you.
+
+```bash
+python3 bench/agent-bench.py --depths 2048,8192,32768   # what an agent feels
+python3 bench/sweep.py --ask code --temp 0.7            # compare launch flags
+```
+
+`agent-bench.py` measures time-to-first-token, prefill and decode at real
+context lengths, and reports **KV reuse** — a multi-turn agent re-sends a
+growing prefix every turn, and if the server reuses it those turns cost almost
+nothing. On the reference machine, turn 2 of an 8k conversation returns in
+**0.41 s against the 8.87 s** the cold first turn takes.
+
+Three traps to avoid, all of which produced wrong answers here before being
+fixed:
+
+- **Repeating an identical prompt measures the cache.** llama.cpp reuses the
+  slot's KV for a shared prefix, so the second send reports `prompt_n=1` and a
+  "prefill rate" for a single token. Vary the first words of the prompt.
+- **Greedy sampling pins draft acceptance at 100%.** Real acceptance is ~78-91%.
+  Fine for comparing launch flags, wrong for quoting a speedup.
+- **A laptop throttles.** Ten configs back to back make the last ones look
+  broken. Alternate the configs and re-measure the baseline at the end.
+
+### Tested and rejected
+
+Measured, not assumed — each of these is a plausible optimisation that does not
+work here:
+
+| change | result |
+|---|---|
+| `-ub 1024/2048`, `-b 4096/8192` | **no effect on long-context prefill** (397-420 t/s at 32k, all within noise) |
+| `-ctk q4_0 -ctv q4_0` | **slower prefill** — 721 t/s at 8k against 867 for q8_0 |
+| deeper MTP (depth 4) | no better than 3, more memory |
+| ngram speculation | slower than plain autoregressive |
+
+The batch-size result is the useful one: at 32k, prefill sits at ~420 t/s no
+matter how the batches are arranged, so that cost is architectural — five of
+thirty layers are full-attention and get quadratically more expensive — and not
+something a flag will fix.
 
 ## Vision costs 24%
 
@@ -208,18 +296,15 @@ See [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
 THINKING="off" | "minimal" | "low" | "high"
 ```
 
-Measured on "reply with exactly: endpoint ok":
-
-| setting | completion tokens | of which reasoning |
-|---|---:|---:|
-| `off` | **3** | 0 |
-| `minimal` | 98 | ~70 |
-
 **llama.cpp cannot cap thinking.** Unlike MTPLX there is no token budget here —
 the setting only turns the thinking block on or off through the chat template.
 So `minimal`, `low` and `high` all behave as "on", and **`off` is the only
-setting that actually reduces thinking**. It is the default for that reason, and
-it frees budget for tool calls, which share the same allowance.
+setting that actually reduces thinking**. It is the default for that reason.
+
+It is also the largest single lever on agent turn latency — see
+[Thinking is on or off](#thinking-is-on-or-off-and-off-is-3x-faster-per-turn)
+for the measurements. `off` frees budget for tool calls, which share the same
+allowance, so it helps correctness as well as speed.
 
 ## Quick start
 
