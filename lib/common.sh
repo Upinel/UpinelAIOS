@@ -56,8 +56,9 @@ show_usage() {
 #   26b-a4b      MoE, ~4B active per token. The speed pick.
 #   12b          dense 12B
 #   31b-heretic  dense 31B, abliterated. Highest quality.
-#   e4b          small and very fast
-MODEL_ALIASES="26b-a4b 12b 31b-heretic e4b"
+#   e4b          middle size - measured slower than both the 26B MoE and E2B
+#   e2b          smallest and FASTEST. Fits an 8 GB Mac.
+MODEL_ALIASES="26b-a4b 12b 31b-heretic e4b e2b"
 
 model_repo_for() {
   case "$1" in
@@ -65,6 +66,7 @@ model_repo_for() {
     12b)         echo "HauhauCS/Gemma4-12B-QAT-Uncensored-HauhauCS-Balanced" ;;
     31b-heretic) echo "llmfan46/gemma-4-31B-it-uncensored-heretic-GGUF" ;;
     e4b)         echo "HauhauCS/Gemma-4-E4B-Uncensored-HauhauCS-Aggressive" ;;
+    e2b)         echo "HauhauCS/Gemma-4-E2B-Uncensored-HauhauCS-Aggressive" ;;
     */*)         echo "$1" ;;
     *)           die "MODEL=\"$1\" is neither a known alias nor an owner/name repo id.
     Known aliases: $MODEL_ALIASES" ;;
@@ -73,7 +75,7 @@ model_repo_for() {
 
 model_is_known_alias() {
   case "$1" in
-    26b-a4b|12b|31b-heretic|e4b) return 0 ;;
+    26b-a4b|12b|31b-heretic|e4b|e2b) return 0 ;;
     *) return 1 ;;
   esac
 }

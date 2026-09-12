@@ -49,13 +49,58 @@ serves.
 
 | | |
 |---|---|
-| **Minimum** | Apple Silicon Mac, **32 GB** unified memory, macOS 14+, ~20 GB free disk |
-| **Recommended** | **64 GB** or more, for 128K context with headroom for a normal desktop |
-| **Chip** | Any M-series. Speed scales with memory bandwidth, not core count. |
+| **Minimum** | Apple Silicon Mac, **8 GB** unified memory, macOS 14+ |
+| **Comfortable** | **16 GB** — any Mac, including an M1 MacBook Air |
+| **Recommended** | **64 GB**, for 128K context on the 26B and room for a full desktop |
 
-32 GB works with the default 26B-A4B (17 GB) at a reduced context; use `12b`
-(8 GB) if you want room to breathe. 64 GB is the comfortable target and is what
-this was built and measured on.
+8 GB is genuinely enough, but only with the smallest model. The memory each
+option actually needs, measured as resident set size:
+
+| model | file | RAM used | fits |
+|---|---:|---:|---|
+| `e2b` | 3.4 GB | **4.2 GB** | 8 GB Mac |
+| `e4b` | 5.3 GB | 6.8 GB | 16 GB Mac |
+| `12b` | 7.4 GB | ~10 GB | 16 GB Mac |
+| `26b-a4b` | 16.8 GB | 20.5 GB | 32 GB Mac |
+| `31b-heretic` | 17.8 GB | ~22 GB | 32 GB Mac |
+
+On an 8 GB Mac set `MODEL="e2b"`, `CONTEXT_WINDOW=8192` and
+`MEMORY_LIMIT_GB=6`. macOS itself wants 3–4 GB, so leave it that room. On
+16 GB, `e2b` and `12b` are both comfortable and `26b-a4b` is possible at a
+reduced context.
+
+Disk: 4–20 GB per model, depending which you pick.
+
+## Measured throughput
+
+**M5 Pro (20-core GPU, 64 GB)**, 256 tokens generated, no speculative decoding
+for the small models because none of them ships a draft:
+
+| model | 512 ctx | 8k ctx | RAM |
+|---|---:|---:|---:|
+| **`e2b`** | **107 t/s** | **102 t/s** | 4.2 GB |
+| `26b-a4b` | 89 t/s | 66 t/s | 20.5 GB |
+| `e4b` | 62 t/s | 58 t/s | 6.8 GB |
+
+**`e2b` is the fastest model in the bundle** — quicker than the 26B MoE while
+using a fifth of the memory, and it holds above 100 t/s out to 8k context.
+`e4b` is the odd one out: bigger than `e2b` and slower than both it and the
+26B MoE, so there is little reason to choose it.
+
+### On an M1 MacBook Air
+
+Not measured here — this was built on an M5 Pro — but the estimate is
+straightforward, because decode is memory-bandwidth-bound and the M1 has
+roughly a quarter of an M5 Pro's bandwidth:
+
+| model | estimated decode on M1 |
+|---|---:|
+| `e2b` | ~25 t/s |
+| `26b-a4b` | ~20–22 t/s |
+| `e4b` | ~15 t/s |
+
+Treat those as order-of-magnitude. Even the pessimistic end is a usable agent
+endpoint, and `e2b` at 4.2 GB is the right pick for an 8 GB Air.
 
 ## Measured throughput
 
@@ -154,7 +199,8 @@ fine-tune.** There is no point being fast at something that will not answer.
 | `26b-a4b` | 17 GB | `HauhauCS/Gemma4-26B-A4B-QAT-Uncensored-HauhauCS-Balanced-MTP` — **default**, MoE, fastest |
 | `12b` | 8 GB | `HauhauCS/Gemma4-12B-QAT-Uncensored-HauhauCS-Balanced` |
 | `31b-heretic` | 18 GB | `llmfan46/gemma-4-31B-it-uncensored-heretic-GGUF` — highest quality |
-| `e4b` | 4 GB | `HauhauCS/Gemma-4-E4B-Uncensored-HauhauCS-Aggressive` — tiny and very fast |
+| `e2b` | 4 GB | `HauhauCS/Gemma-4-E2B-Uncensored-HauhauCS-Aggressive` — **fastest**, fits 8 GB |
+| `e4b` | 6 GB | `HauhauCS/Gemma-4-E4B-Uncensored-HauhauCS-Aggressive` — middle, and loses on both counts |
 
 ```bash
 ./model_download.sh                # what is available, what you have

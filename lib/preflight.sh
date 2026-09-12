@@ -79,11 +79,15 @@ recommend_config() {
   if (( ram >= 48 )); then
     REC_MODEL="HauhauCS/Gemma4-26B-A4B-QAT-Uncensored-HauhauCS-Balanced-MTP"
     REC_WEIGHTS_GB=17
-    REC_REASON_MODEL="26B-A4B is the speed pick: MoE, ~4B active per token, uncensored"
-  else
+    REC_REASON_MODEL="26B-A4B is the quality pick: MoE, ~4B active per token, uncensored"
+  elif (( ram >= 16 )); then
     REC_MODEL="HauhauCS/Gemma4-12B-QAT-Uncensored-HauhauCS-Balanced"
     REC_WEIGHTS_GB=8
-    REC_REASON_MODEL="12B fits ${ram} GB comfortably; the 26B-A4B needs about 20 GB resident"
+    REC_REASON_MODEL="12B fits ${ram} GB comfortably; the 26B-A4B wants ~20 GB resident"
+  else
+    REC_MODEL="HauhauCS/Gemma-4-E2B-Uncensored-HauhauCS-Aggressive"
+    REC_WEIGHTS_GB=4
+    REC_REASON_MODEL="${ram} GB is tight, but E2B needs only 4.2 GB resident and is the fastest model here (~107 t/s on the reference Mac)"
   fi
 
   # Context and KV quant together have to fit the memory budget.
@@ -102,15 +106,20 @@ recommend_config() {
   elif (( ram >= 30 )) ; then
     REC_CONTEXT=32768; REC_KV="q8_0"
     REC_REASON_CTX="32K is the reliable ceiling at ${ram} GB"
+  elif (( ram >= 16 )) ; then
+    REC_CONTEXT=16384; REC_KV="q8_0"
+    REC_REASON_CTX="16K on ${ram} GB; llama.cpp reserves the window up front"
   else
-    REC_CONTEXT=16384; REC_KV="q4_0"
-    REC_REASON_CTX="${ram} GB is tight; 16K with q4 KV is the safe floor"
+    REC_CONTEXT=8192; REC_KV="q8_0"
+    REC_REASON_CTX="${ram} GB leaves little room; 8K is the honest ceiling"
   fi
 
   # Leave roughly a quarter of RAM to macOS and everything else. On a 64 GB
   # Mac that is the 48 GB ceiling the reference machine was tuned at.
   REC_MEMORY_LIMIT_GB=$(( ram * 3 / 4 ))
-  (( REC_MEMORY_LIMIT_GB > 8 )) || REC_MEMORY_LIMIT_GB=8
+  # Floor at 4 GB, not 8: an 8 GB Mac should be told 6, and a floor of 8 would
+  # silently recommend more memory than the machine has.
+  (( REC_MEMORY_LIMIT_GB >= 4 )) || REC_MEMORY_LIMIT_GB=4
 
   # Session bank: a fraction of RAM, capped. MTPLX's own auto-sizing picked
   # 16.6 GB on a 64 GB Mac, which pushed wired memory to ~50 GB.

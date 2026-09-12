@@ -24,7 +24,8 @@ size_hint() {
     *26B-A4B*) echo "17 GB" ;;
     *12B*)     echo "8 GB"  ;;
     *31B*)     echo "18 GB" ;;
-    *E4B*)     echo "4 GB"  ;;
+    *E4B*)     echo "6 GB"  ;;
+    *E2B*)     echo "4 GB"  ;;
     *)         echo "?"     ;;
   esac
 }
