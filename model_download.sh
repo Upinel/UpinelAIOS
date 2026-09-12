@@ -19,12 +19,15 @@ case "${1:-}" in
   -h|--help) show_usage "$0"; exit 0 ;;
 esac
 
+# What gets fetched for each model: the selected quant, plus the vision
+# projector and the MTP draft head. Not the whole repo - several of these
+# publish every quant, and the others are skipped. See MODEL_QUANT in env.conf.
 size_hint() {
   case "$1" in
-    *26B-A4B*) echo "17 GB" ;;
+    *26B-A4B*) echo "18 GB" ;;
     *12B*)     echo "8 GB"  ;;
-    *31B*)     echo "18 GB" ;;
-    *E4B*)     echo "6 GB"  ;;
+    *31B*)     echo "20 GB" ;;
+    *E4B*)     echo "7 GB"  ;;
     *E2B*)     echo "4 GB"  ;;
     *)         echo "?"     ;;
   esac
@@ -50,7 +53,11 @@ list_models() {
   done
   log ""
   log "  ${C_DIM}current selection: $MODEL_REPO${C_RESET}"
+  log "  ${C_DIM}quant:             ${MODEL_QUANT:-Q4_K_M} (set MODEL_QUANT in env.conf)${C_RESET}"
   log "  ${C_DIM}models live in:    $MODELS_DIR${C_RESET}"
+  log ""
+  log "  ${C_DIM}Size is what will actually be fetched: the selected quant plus the${C_RESET}"
+  log "  ${C_DIM}vision projector and MTP draft head. Other quants are skipped.${C_RESET}"
   log ""
   log "  Download one:   ./model_download.sh 12b"
   log "  Switch to one:  ./model_download.sh --switch 12b"
@@ -68,8 +75,9 @@ download_one() {
   fi
 
   step "Downloading $want"
-  log "  repo: $repo"
-  log "  size: about $(size_hint "$repo")"
+  log "  repo:  $repo"
+  log "  quant: ${MODEL_QUANT:-Q4_K_M}  (other quants in the repo are skipped)"
+  log "  size:  about $(size_hint "$repo")"
   log ""
   "$REPO_DIR/lib/fetch-model.sh" "$repo" "$dir" || return 1
 
@@ -125,6 +133,9 @@ case "${1:-}" in
     ;;
   --all)
     step "Downloading every known model"
+    log "  ${C_DIM}One quant each (${MODEL_QUANT:-Q4_K_M}), not every quant the repos publish.${C_RESET}"
+    log "  ${C_DIM}Expect roughly 50 GB rather than several hundred.${C_RESET}"
+    log ""
     failed=0
     for alias in $MODEL_ALIASES; do
       download_one "$alias" || { warn "failed: $alias"; failed=1; }

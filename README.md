@@ -240,13 +240,22 @@ Point any OpenAI-compatible client at the URL `./status.sh` prints.
 **Every model UpinelAIOS-G ships or suggests is an uncensored Gemma 4
 fine-tune.** There is no point being fast at something that will not answer.
 
-| alias | size | repo |
+| alias | download | repo |
 |---|---:|---|
-| `26b-a4b` | 17 GB | `HauhauCS/Gemma4-26B-A4B-QAT-Uncensored-HauhauCS-Balanced-MTP` — **default**, MoE, fastest |
+| `26b-a4b` | 18 GB | `HauhauCS/Gemma4-26B-A4B-QAT-Uncensored-HauhauCS-Balanced-MTP` — **default**, MoE, fastest |
 | `12b` | 8 GB | `HauhauCS/Gemma4-12B-QAT-Uncensored-HauhauCS-Balanced` |
-| `31b-heretic` | 18 GB | `llmfan46/gemma-4-31B-it-uncensored-heretic-GGUF` — highest quality |
+| `31b-heretic` | 20 GB | `llmfan46/gemma-4-31B-it-uncensored-heretic-GGUF` — highest quality |
 | `e2b` | 4 GB | `HauhauCS/Gemma-4-E2B-Uncensored-HauhauCS-Aggressive` — **fastest**, fits 8 GB |
-| `e4b` | 6 GB | `HauhauCS/Gemma-4-E4B-Uncensored-HauhauCS-Aggressive` — middle, and loses on both counts |
+| `e4b` | 7 GB | `HauhauCS/Gemma-4-E4B-Uncensored-HauhauCS-Aggressive` — middle, and loses on both counts |
+
+**Only one quant is downloaded.** GGUF repos often publish every quant of the
+same model, and the `31b-heretic` repo carries ten of them — 232 GB in total,
+of which the 18.7 GB `Q4_K_M` is the one that fits a Mac. Fetching the repo
+wholesale would cost twelve times the disk and hours of download, so
+UpinelAIOS-G picks a single quant (`MODEL_QUANT` in `env.conf`, default
+`Q4_K_M`) and skips the rest. The sizes above are what actually lands on disk:
+that quant, plus the vision projector and the MTP draft head, which are
+separate artifacts rather than quants and are always fetched.
 
 ```bash
 ./bench/verify-tools.sh            # check tool calling, measure a file write
