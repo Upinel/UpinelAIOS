@@ -52,6 +52,38 @@ already truncated.
 
 Also worth setting `THINKING="off"`: thinking tokens come out of the same budget.
 
+### The other variant: `missing required property "description"`
+
+Same error message, **different cause**, and the fix is different too.
+
+Some tool schemas require a human-readable label alongside the real payload — a
+`description` next to a `command`. Models routinely treat that as optional
+metadata and simply skip it, even though the schema marks it required. The call
+is well-formed JSON with a field missing, so it is not a truncation and raising
+`max_tokens` will not help.
+
+Measured on this machine, six runs each, asking for the same command:
+
+| system prompt | `description` included |
+|---|---:|
+| *"You are a coding agent."* | **1/6** |
+| *"Every tool call MUST include every required field."* | 5/6 |
+| *"…always supply both `command` and `description`."* | **6/6** |
+
+**Naming the fields explicitly in the agent's system prompt fixes it.** Marking
+the label optional in the tool schema also resolves it, if you control the
+schema.
+
+How to tell the two apart:
+
+| symptom | `finish_reason` | cause | fix |
+|---|---|---|---|
+| arguments unparseable, ends mid-string | `length` | truncated | raise `max_tokens` |
+| arguments valid JSON, a field absent | `tool_calls` | model omitted it | name it in the prompt |
+
+`./bench/verify-tools.sh` reports both: check 3 measures the budget a file write
+needs, and check 4b runs five trials against an advisory required field.
+
 ## Everything is slower than the README numbers
 
 Check, in order:

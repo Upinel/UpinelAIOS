@@ -53,6 +53,22 @@ TOOLS = [
                                  "required": ["path"]}}},
 ]
 
+# A tool whose required fields include a human-readable label. Models frequently
+# treat a label as optional metadata and omit it even when the schema says
+# required, which the agent then reports as a missing property.
+ADVISORY_TOOLS = [
+    {"type": "function",
+     "function": {"name": "bash",
+                  "description": "Run a shell command",
+                  "parameters": {"type": "object",
+                                 "properties": {
+                                     "command": {"type": "string",
+                                                 "description": "The command to run"},
+                                     "description": {"type": "string",
+                                                     "description": "Short description of what this command does"}},
+                                 "required": ["command", "description"]}}},
+]
+
 # A request that forces a substantial file body, so the tool call is the size
 # real agent work produces rather than a one-line toy.
 BIG_TASK = ("Create a Python file at /tmp/upinel_stats.py that reads a CSV, "
@@ -181,21 +197,26 @@ def main():
         used = (body.get("usage") or {}).get("completion_tokens")
         if call:
             fn = call.get("function") or {}
+            parsed = None
             try:
                 parsed = json.loads(fn.get("arguments") or "{}")
-                body_len = len(parsed.get("content") or "")
-                needed = used
-                report.check("complete file write returned", finish == "tool_calls",
-                             f"{used} tokens used, {body_len} chars of file content")
-                if needed:
-                    print(f"         {YELLOW}-> give agents at least {needed} max_tokens "
-                          f"for writes this size{RESET}")
             except json.JSONDecodeError:
+                pass
+            # A required property can go missing two different ways, and they
+            # need different fixes, so they are reported separately:
+            #   finish=length + unusable JSON -> truncated, raise max_tokens
+            #   finish=tool_calls + valid JSON missing a field -> the model
+            #     treated that field as optional
+            if parsed is None:
                 report.check("complete file write returned", False,
-                             f"TRUNCATED after {used} tokens - raise the client's max_tokens")
-        else:
-            report.check("complete file write returned", False,
-                         f"no tool call; finish_reason={finish!r}")
+                             f"truncated after {used} tokens - raise the client's max_tokens")
+            else:
+                missing = [k for k in ("file_path", "content") if k not in parsed]
+                report.check("complete file write returned",
+                             finish == "tool_calls" and not missing,
+                             f"{used} tokens used, {len(parsed.get('content') or '')} chars"
+                             + (f", MISSING {missing}" if missing else ""))
+                needed = used
     except Exception as e:                                     # noqa: BLE001
         report.check("large tool call", False, f"{type(e).__name__}: {e}",
                      transport=isinstance(e, (urllib.error.URLError, OSError, TimeoutError)))
@@ -223,6 +244,50 @@ def main():
                          if truncated else "did not truncate on this run")
         except Exception as e:                                 # noqa: BLE001
             report.check("starvation run", False, f"{type(e).__name__}: {e}")
+
+    # ── 4b. required fields the model treats as optional ─────────────────────
+    print("\n  4b. Advisory required fields  (the 'description' failure)")
+    print(f"     {DIM}a label field is easy for a model to skip even when the{RESET}")
+    print(f"     {DIM}schema says required, and the agent reports it as missing.{RESET}")
+    trials = 5
+    kept = 0
+    trunc = 0
+    for _ in range(trials):
+        try:
+            body = post(base + "/chat/completions",
+                        {"model": args.model, "max_tokens": 400,
+                         "tools": ADVISORY_TOOLS,
+                         "messages": [{"role": "system", "content": "You are a coding agent."},
+                                      {"role": "user",
+                                       "content": "Find every Python file that imports "
+                                                  "requests and report the count."}]},
+                        headers, args.timeout)
+            choice, msg, call = first_call(body)
+            if not call:
+                continue
+            fn = call.get("function") or {}
+            raw = fn.get("arguments") or "{}"
+            try:
+                parsed = json.loads(raw)
+            except json.JSONDecodeError:
+                trunc += 1
+                continue
+            if "description" in parsed and "command" in parsed:
+                kept += 1
+        except Exception:                                      # noqa: BLE001
+            continue
+    rate = kept / trials
+    report.check(f"advisory field present in all {trials} trials", kept == trials,
+                 f"included in {kept}/{trials} runs"
+                 + (f", {trunc} truncated" if trunc else ""))
+    if kept < trials:
+        print(f"         {YELLOW}-> the model treats a label field as optional. Measured{RESET}")
+        print(f"         {YELLOW}   on this machine with three system prompts:{RESET}")
+        print(f"         {DIM}     plain                         1/6 runs included it{RESET}")
+        print(f"         {DIM}     'every required field'        5/6{RESET}")
+        print(f"         {YELLOW}     naming the fields explicitly  6/6{RESET}")
+        print(f"         {YELLOW}   The fix is in the agent's system prompt, not the server:{RESET}")
+        print(f"         {YELLOW}   name the required fields, or mark a label optional.{RESET}")
 
     # ── 5. streaming, the path agents use ────────────────────────────────────
     print("\n  5. Streaming tool call")

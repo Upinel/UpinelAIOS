@@ -158,9 +158,9 @@ images; text quality is identical either way.
 
 ## Agents that write files
 
-If your agent reports **`invalid arguments: missing required property "file_path"`**,
-it is almost certainly a truncated tool call, not a broken schema — and the
-diagnostic measures the number instead of guessing:
+If your agent reports **`invalid arguments: missing required property "x"`**,
+there are two distinct causes and the fix differs. Run the diagnostic, which
+identifies which one you have:
 
 ```bash
 ./bench/verify-tools.sh
@@ -179,7 +179,28 @@ cannot find.
 | a full module | 4096 |
 
 `MAX_RESPONSE_TOKENS` is the server's ceiling, not a floor — it cannot rescue a
-call the client already truncated. See [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
+call the client already truncated.
+
+**The second cause is different.** If the missing field is a *label* — a
+`description` next to a `command`, say — the call is valid JSON with a field the
+model chose to skip. It is not truncated and more `max_tokens` will not help.
+Measured here, six runs each:
+
+| agent system prompt | label present |
+|---|---:|
+| *"You are a coding agent."* | 1/6 |
+| *"…MUST include every required field."* | 5/6 |
+| *"…always supply both `command` and `description`."* | **6/6** |
+
+**Name the required fields in the agent's system prompt**, or mark the label
+optional in the schema. How to tell them apart:
+
+| arguments | `finish_reason` | cause | fix |
+|---|---|---|---|
+| unparseable, ends mid-string | `length` | truncated | raise `max_tokens` |
+| valid JSON, field absent | `tool_calls` | model omitted it | name it in the prompt |
+
+See [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
 
 ## Thinking
 
