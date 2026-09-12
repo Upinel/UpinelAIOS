@@ -193,26 +193,17 @@ while IFS=$'\t' read -r WANT NAME; do
   fi
 done < "$MANIFEST"
 
-rm -f "$DEST/.manifest.tsv"
-
 if (( FAILED )); then
   die "Some files did not download. Re-run ./install.sh - it resumes where it stopped."
 fi
 
 # ── final size audit ─────────────────────────────────────────────────────────
-# Write the expected sizes to a plain file first. Nesting a heredoc inside a
-# process substitution is legal but fragile, and a mis-parse here would silently
-# pass an incomplete download.
-python3 - "$DEST/.manifest.json" > "$DEST/.expected.tsv" <<'PY'
-import json, sys
-d = json.load(open(sys.argv[1]))
-for f in d.get("siblings", []):
-    name = f.get("rfilename")
-    size = f.get("size")
-    if name and size is not None and name not in {".gitattributes", "README.md"}:
-        print(f"{size}\t{name}")
-PY
-
+# Audit the FILTERED manifest - the files we actually chose to fetch. Auditing
+# against the raw API listing checks every quant in the repo, finds the ones we
+# deliberately skipped missing, and fails a perfectly good download with
+# "incomplete: <quant we never wanted>". That is what made a single-quant fetch
+# look like it was still trying to pull the whole repo.
+AUDIT="$DEST/.manifest.tsv"
 BAD=0
 while IFS=$'\t' read -r WANT NAME; do
   [[ -n "$NAME" ]] || continue
@@ -221,11 +212,13 @@ while IFS=$'\t' read -r WANT NAME; do
     warn "incomplete: $NAME ($HAVE/$WANT bytes)"
     BAD=1
   fi
-done < "$DEST/.expected.tsv"
+done < "$AUDIT"
 
-rm -f "$DEST/.expected.tsv" "$DEST/.manifest.json"
+rm -f "$DEST/.manifest.tsv" "$DEST/.manifest.json"
 
-(( BAD )) && die "Model download is incomplete. Re-run ./install.sh."
+if (( BAD )); then
+  die "Downloaded files are incomplete. Re-run ./install.sh - it resumes where it stopped."
+fi
 
 DU="$(du -sh "$DEST" | cut -f1)"
 ok "Model ready at $DEST  ($DU)"
