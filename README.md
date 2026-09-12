@@ -131,6 +131,42 @@ so the expensive event is the first turn of a session, not the twentieth.
 > sliding window). Keep agent contexts under ~32k where the speed is, and let
 > KV reuse carry the rest.
 
+## Keep the prompt prefix stable
+
+KV reuse is what makes multi-turn agents cheap, and it only works if the
+prompt **only ever grows**. Measured at 8k of history:
+
+| what the harness did | tokens reused | TTFT |
+|---|---:|---:|
+| appended a new turn | 10,079 | **0.16 s** |
+| edited a message **early** in the history | 343 | **9.40 s** |
+| edited a message **in the middle** | 343 | **9.76 s** |
+| appended at the very end | 10,076 | 0.15 s |
+
+A change anywhere except the very end discards the cache from that point on,
+and in practice the whole prompt is re-prefilled: **61x the latency** for an
+edit that may have changed one word. The tokens after the edit are
+byte-identical, but llama.cpp cannot reuse them.
+
+So harness behaviour matters as much as anything in `env.conf`:
+
+- **Append, never rewrite.** Adding turns is nearly free; re-rendering old
+  ones is not.
+- **Truncating or eliding an old tool result is an edit** — it rewrites every
+  token after it. Prefer dropping whole turns from the *front* (which keeps the
+  recent suffix intact) over trimming the middle.
+- **Compaction is the expensive one.** Rewriting history once costs a full
+  re-prefill, so do it rarely and deliberately.
+
+Run `python3 bench/cache-reuse-test.py` to see which of these your harness does.
+
+> **`--cache-reuse` does not fix this — it makes it worse.** llama.cpp exposes
+> it for reusing chunks past a divergence, so it looks like the obvious answer.
+> Measured on the same 8k prompts: an early edit costs 9.40 s by default,
+> **12.11 s at `--cache-reuse 64`** and **14.54 s at `--cache-reuse 256`** —
+> and `cache_n` stays at 343 either way, so it buys no reuse at all, only KV
+> shifting work. UpinelAIOS-G deliberately does not set it.
+
 ## Speculative depth — the one speed knob that matters
 
 Gemma 4 ships a small companion drafter. It is a real win here, unlike the MTP
@@ -195,6 +231,7 @@ throughput benchmark gives you.
 ```bash
 python3 bench/agent-bench.py --depths 2048,8192,32768   # what an agent feels
 python3 bench/sweep.py --ask code --temp 0.7            # compare launch flags
+python3 bench/cache-reuse-test.py --depth 8192          # does your harness reuse?
 ```
 
 `agent-bench.py` measures time-to-first-token, prefill and decode at real
@@ -223,6 +260,7 @@ work here:
 |---|---|
 | `-ub 1024/2048`, `-b 4096/8192` | **no effect on long-context prefill** (397-420 t/s at 32k, all within noise) |
 | `-ctk q4_0 -ctv q4_0` | **slower prefill** — 721 t/s at 8k against 867 for q8_0 |
+| `--cache-reuse 64` / `256` | **slower** — 12.11 s / 14.54 s against 9.40 s, with no extra reuse |
 | deeper MTP (depth 4) | no better than 3, more memory |
 | ngram speculation | slower than plain autoregressive |
 
