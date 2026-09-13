@@ -161,6 +161,28 @@ reply without quitting; `Ctrl-D` leaves.
 **Every model UpinelAIOS-GGUF ships or suggests is an uncensored fine-tune.**
 There is no point being fast at something that will not answer.
 
+You do not have to choose from these tables by hand. `install.sh` scans your Mac
+and proposes a model and settings for it; if you would rather not have that one,
+answer `n` at the prompt and it prints a numbered list of everything below, each
+row marked with a verdict for *your* memory:
+
+```
+    #  ALIAS        SIZE   VERDICT              NOTE
+    1  26b-q4       15 GB  RECOMMENDED          uncensored MoE, 3B active - the fastest 26B here
+    2  26b-a4b      18 GB  fits comfortably     same MoE in Q4_K_M: about 20% slower, 3 GB bigger
+    ...
+    7  qwen-27b     19 GB  will not fit         dense 27B, ~14 t/s; its MTP head needs a build step
+  Model number:
+```
+
+`RECOMMENDED` / `fits comfortably` / `tight - expect paging` / `will not fit` are
+computed from your unified memory, the model's published size, and that model's
+own KV cost per token — a full-attention Qwen costs several times more per token
+than the sliding-window Gemma MoE, so the verdicts are per-model, not per-size.
+Enter a number to use it, or press Enter to keep the config you already have.
+Choosing something that will not fit is allowed; it warns, then does what you
+asked.
+
 #### Gemma 4
 
 | alias | download | repo |
