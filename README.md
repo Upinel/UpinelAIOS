@@ -117,6 +117,7 @@ git clone https://github.com/upinel/UpinelAIOS-GGUF && cd UpinelAIOS-GGUF
 ./chat.sh             # talk to it right here in the terminal
 ./status.sh           # live dashboard
 ./restart.sh          # apply an env.conf change
+./model_download.sh   # download another model
 ./stop.sh
 ```
 
