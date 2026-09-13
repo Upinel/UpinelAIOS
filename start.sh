@@ -45,6 +45,17 @@ case "$KV_QUANT" in q8_0|q4_0|f16|bf16) ;; *) die "KV_QUANT=\"$KV_QUANT\" is not
 thinking_level_ok "$THINKING" || die "THINKING=\"$THINKING\" is not one of off | minimal | low | high"
 case "$FAN_MODE" in default|smart|max) ;; *) die "FAN_MODE=\"$FAN_MODE\" is not one of default | smart | max" ;; esac
 
+# ── which downloaded model to serve ──────────────────────────────────────────
+# Offered only when there is a real choice: more than one model on disk, a
+# terminal to answer on, and no --model. Anything else keeps env.conf's MODEL,
+# so a start in a pipe, in CI or under launchd is never held up by a prompt.
+if [[ -z "$MODEL_OVERRIDE" ]] && (( ! PRINT_ONLY )); then
+  if choose_model_on_disk; then
+    export MODEL_REPO MODEL_DIR
+    info "Serving $MODEL_REPO for this run. Set MODEL in env.conf to make it permanent."
+  fi
+fi
+
 MAIN_GGUF="$(model_main_gguf "$MODEL_DIR" || true)"
 [[ -n "$MAIN_GGUF" ]] || die "No model weights found in $MODEL_DIR
     Run ./install.sh, or ./model_download.sh $MODEL"

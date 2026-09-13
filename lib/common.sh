@@ -203,6 +203,111 @@ model_main_gguf() {
     | sort -rn | head -1 | cut -f2
 }
 
+# ── which models are actually downloaded ─────────────────────────────────────
+# One line per model directory that holds a loadable weight file. A directory
+# left behind by an interrupted download is skipped rather than offered, so the
+# picker cannot hand the server something that fails to load a second later.
+#
+# `|| true` is load-bearing: model_main_gguf ends in a pipeline, and under
+# `set -o pipefail` a directory with no .gguf at all makes that pipeline fail,
+# which would abort the caller.
+model_dirs_on_disk() {
+  local dir
+  for dir in "$MODELS_DIR"/*/; do
+    [[ -d "$dir" ]] || continue
+    dir="${dir%/}"
+    [[ -n "$(model_main_gguf "$dir" 2>/dev/null || true)" ]] || continue
+    printf '%s\n' "$dir"
+  done
+  return 0
+}
+
+# "owner--name" back to "owner/name". Only the FIRST separator is restored,
+# which is correct: exactly one was inserted when the directory was named.
+model_repo_from_dir() {
+  local base; base="$(basename "$1")"
+  printf '%s\n' "${base/--//}"
+}
+
+# Reverse-map a repo id back to its alias. Empty when it is not a known alias.
+alias_for_repo() {
+  local a
+  for a in $MODEL_ALIASES; do
+    [[ "$(model_repo_for "$a" 2>/dev/null)" == "$1" ]] && { printf '%s\n' "$a"; return 0; }
+  done
+  printf '\n'
+}
+
+# How long the on-disk picker waits before taking the default. Whole seconds
+# only: bash 3.2 - which is what ships on macOS - rejects `read -t 0.5` with
+# "invalid timeout specification".
+MODEL_PICK_SECONDS=5
+
+# Offer the models already downloaded, when there is a real choice to make.
+#
+# Sets MODEL_REPO and MODEL_DIR when something is chosen and returns 0; returns
+# 1 to mean "keep what env.conf says", which covers every case where asking
+# would be wrong: one model on disk, no terminal to ask on, an unreadable
+# answer, or no answer within MODEL_PICK_SECONDS.
+#
+# Never prompts without a terminal. A server start must not hang behind a
+# question in a pipe, in CI, or under launchd.
+choose_model_on_disk() {
+  local dirs=() d
+  while IFS= read -r d; do
+    [[ -n "$d" ]] && dirs+=("$d")
+  done < <(model_dirs_on_disk)
+
+  (( ${#dirs[@]} > 1 )) || return 1
+  [[ -t 0 ]] || return 1
+
+  local default_dir="$MODELS_DIR/${MODEL_REPO//\//--}"
+  local default_idx=1 i=1 repo alias name mf size mark
+  for d in "${dirs[@]}"; do
+    [[ "$d" == "$default_dir" ]] && default_idx=$i
+    i=$(( i + 1 ))
+  done
+
+  log ""
+  log "  ${C_BOLD}Models on disk${C_RESET}   ${C_DIM}${#dirs[@]} downloaded - pick one to serve now${C_RESET}"
+  log ""
+  i=1
+  for d in "${dirs[@]}"; do
+    repo="$(model_repo_from_dir "$d")"
+    alias="$(alias_for_repo "$repo")"
+    name="${alias:-${repo##*/}}"
+    mf="$(model_main_gguf "$d" 2>/dev/null || true)"
+    size=$(( ${#mf} ? $(stat -f%z "$mf" 2>/dev/null || echo 0) / 1000000000 : 0 ))
+    mark=""
+    (( i == default_idx )) && mark="${C_DIM}<- default${C_RESET}"
+    printf '  %2d  %-12s %3s GB  %s\n' "$i" "$name" "$size" "$mark"
+    i=$(( i + 1 ))
+  done
+  log ""
+  printf '  Number [1-%d], or Enter for the default. Auto-selects in %ds: ' \
+         "${#dirs[@]}" "$MODEL_PICK_SECONDS"
+
+  local ans=""
+  if ! read -r -t "$MODEL_PICK_SECONDS" ans; then
+    log ""
+    info "No answer in ${MODEL_PICK_SECONDS}s - using $(basename "$default_dir")."
+    return 1
+  fi
+
+  ans="${ans//[!0-9]/}"
+  if [[ -z "$ans" ]]; then
+    return 1                      # Enter: keep the default
+  fi
+  if (( ans < 1 || ans > ${#dirs[@]} )); then
+    warn "No model number $ans - using the default."
+    return 1
+  fi
+
+  MODEL_DIR="${dirs[$(( ans - 1 ))]}"
+  MODEL_REPO="$(model_repo_from_dir "$MODEL_DIR")"
+  return 0
+}
+
 # Match "mmproj" anywhere in the name, not only at the start. Plenty of repos
 # embed it mid-filename - gemma-4-26B-A4B-...-mmproj-BF16.gguf - and the old
 # anchored mmproj*.gguf pattern silently found nothing for them.
@@ -228,6 +333,43 @@ model_mmproj_gguf() {
 # while adding the Qwen entries, because the fallback searched all of models/.
 # So a draft found outside this model's own directory has to match its family.
 #
+# Which model a filename is for: "26B-A4B", "E2B", "31B". Empty when the name
+# carries no such token.
+#
+# Bash 3.2 has no ${var^^}, and macOS ships 3.2, hence the tr.
+model_designation() {
+  local name tok=""
+  name="$(basename "$1")"
+  if [[ "$name" =~ ([0-9]+[Bb]-[Aa][0-9]+[Bb]) ]]; then
+    tok="${BASH_REMATCH[1]}"
+  elif [[ "$name" =~ ([Ee][0-9]+[Bb]) ]]; then
+    tok="${BASH_REMATCH[1]}"
+  elif [[ "$name" =~ ([0-9]+[Bb]) ]]; then
+    tok="${BASH_REMATCH[1]}"
+  fi
+  printf '%s\n' "$(printf '%s' "$tok" | tr '[:lower:]' '[:upper:]')"
+}
+
+# Speculative draft head for a model directory, or nothing.
+#
+# A draft head is only valid for the exact model it was trained against - it is
+# a second network predicting that target's next tokens. Getting this wrong does
+# not degrade, it aborts: pairing the 26B head with the 2B target died in
+# llama.cpp with
+#
+#   GGML_ASSERT(ggml_can_mul_mat(a, b)) failed
+#   llama_model_gemma4_assistant::graph
+#
+# and took the whole server with it, for a model that runs fine without MTP.
+#
+# So a head is accepted only if its designation matches the target's, and a head
+# found OUTSIDE this model's own directory must additionally match its family -
+# a Gemma head on a Qwen target loads with no complaint and is silently wrong.
+#
+# The cross-directory search is not optional: the default `26b-q4` repo ships
+# weights and a projector but no draft, and borrows the 26B head from the
+# sibling `26b-a4b` directory, which is the same architecture and is correct.
+#
 # Draft files are named inconsistently across repos - mtp-*.gguf,
 # FastMTP-32K.gguf, *-draft.gguf - so match on the substring, not a prefix.
 model_draft_gguf() {
@@ -242,18 +384,38 @@ model_draft_gguf() {
     *[Gg]emma*) fam="gemma" ;;
   esac
 
-  # Match the BASENAME, not the whole path: the HauhauCS Gemma directory is
-  # literally named "...-MTP", so grepping the path made its vision projector
-  # look like a draft head.
-  hit="$(find -L "$dir" -maxdepth 1 \
-           \( -iname '*mtp*.gguf' -o -iname '*draft*.gguf' \) 2>/dev/null | head -1)"
+  # What the target is, taken from its weights file where possible: that is the
+  # file the draft has to line up with. `|| true` because model_main_gguf ends
+  # in a pipeline and pipefail turns "no weights here" into a failure.
+  local target want
+  target="$(model_main_gguf "$dir" 2>/dev/null || true)"
+  want="$(model_designation "${target:-$(basename "$dir")}")"
 
-  if [[ -z "$hit" && -n "$fam" ]]; then
-    # Cross-directory, so gate on family: a Gemma head paired with a Qwen
-    # target loads without complaint and is silently wrong.
-    hit="$(find -L "$MODELS_DIR" -maxdepth 2 \
-             \( -iname '*mtp*.gguf' -o -iname '*draft*.gguf' \) 2>/dev/null \
-            | grep -i "$fam" | head -1)"
+  local f d
+  # Same directory first. An unparseable name on either side is accepted here:
+  # a draft shipped alongside the model is taken at its word, and plenty are
+  # named "draft.gguf" with no size token at all.
+  while IFS= read -r f; do
+    [[ -n "$f" ]] || continue
+    d="$(model_designation "$f")"
+    if [[ -z "$want" || -z "$d" || "$want" == "$d" ]]; then
+      hit="$f"; break
+    fi
+  done < <(find -L "$dir" -maxdepth 1 \
+             \( -iname '*mtp*.gguf' -o -iname '*draft*.gguf' \) 2>/dev/null)
+
+  # Then across model directories, where both sides must agree explicitly.
+  if [[ -z "$hit" && -n "$want" ]]; then
+    while IFS= read -r f; do
+      [[ -n "$f" ]] || continue
+      d="$(model_designation "$f")"
+      [[ -n "$d" && "$d" == "$want" ]] || continue
+      if [[ -n "$fam" ]] && ! printf '%s' "$f" | grep -qi "$fam"; then
+        continue
+      fi
+      hit="$f"; break
+    done < <(find -L "$MODELS_DIR" -maxdepth 2 \
+               \( -iname '*mtp*.gguf' -o -iname '*draft*.gguf' \) 2>/dev/null)
   fi
 
   [[ -n "$hit" ]] && echo "$hit"

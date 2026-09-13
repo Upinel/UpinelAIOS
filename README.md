@@ -124,6 +124,32 @@ git clone https://github.com/upinel/UpinelAIOS-GGUF && cd UpinelAIOS-GGUF
 
 Point any OpenAI-compatible client at the URL `./status.sh` prints.
 
+**If you have more than one model downloaded, `start.sh` and `restart.sh` ask
+which one to serve.** Press a number, or Enter for the default; with no answer
+within five seconds the default from `env.conf` is used, so nothing ever waits
+on you:
+
+```
+  Models on disk   5 downloaded - pick one to serve now
+
+   1  e2b            3 GB
+   2  26b-a4b       16 GB
+   3  qwen-27b      17 GB
+   4  26b-q4        14 GB  <- default
+   5  qwen-9b        5 GB
+
+  Number [1-5], or Enter for the default. Auto-selects in 5s:
+```
+
+It is a one-run choice and is not written back — `MODEL` in `env.conf` is still
+the default. Pass `--model 12b` to skip the question entirely, and note that it
+is skipped automatically whenever there is no terminal to ask on (a pipe, CI,
+`nohup`, launchd) or only one model is downloaded.
+
+Only complete downloads are offered: a directory left behind by an interrupted
+download is not listed, so the picker cannot hand you a model that fails to
+load.
+
 ### Chatting from the terminal
 
 `./chat.sh` is a streaming chat client for the server you already have running.
