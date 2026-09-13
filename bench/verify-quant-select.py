@@ -103,6 +103,16 @@ def check(label, got, want):
 
 def select(listing, pref):
     """Run the real selector out of fetch-model.sh. Returns (tag, files, gb)."""
+    tag, files, total, _ = select_note(listing, pref)
+    return tag, files, total
+
+
+def select_note(listing, pref):
+    """As select(), but also returns the severity-tagged note.
+
+    The note is "<severity>\\t<message>" on stderr, where severity is "info"
+    when the substitution kept the bit width and "warn" when it did not.
+    """
     src = open(FETCH).read()
     block = src.split("<<'PY'")[1].split("\nPY\n")[0]
     with tempfile.TemporaryDirectory() as td:
@@ -111,14 +121,15 @@ def select(listing, pref):
         json.dump(listing, open(mpath, "w"))
         script = os.path.join(td, "sel.py")
         open(script, "w").write(block)
-        with open(os.devnull, "w") as devnull:
-            r = subprocess.run([sys.executable, script, mpath, pref, qpath],
-                               stdout=subprocess.PIPE, stderr=devnull, text=True)
+        r = subprocess.run([sys.executable, script, mpath, pref, qpath],
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         tag = open(qpath).read() if os.path.exists(qpath) else ""
         rows = [l.split("\t") for l in r.stdout.strip().split("\n") if l.strip()]
         files = [x[1] for x in rows if x[1].endswith(".gguf")]
         total = sum(int(x[0]) for x in rows) / 1e9
-        return tag, files, round(total, 2)
+        note = r.stderr.strip().split("\t")
+        sev = note[0] if len(note) == 2 else ""
+        return tag, files, round(total, 2), sev
 
 
 def main():
@@ -157,6 +168,21 @@ def main():
     # Untagged single-quant repo should still work.
     tag, files, _ = select(REPOS["untagged"], "Q4_K_M")
     check("untagged repo still fetches its single weight", len(files), 2)
+
+    # ── note severity ────────────────────────────────────────────────────────
+    # A substitution that keeps the bit width is what the request meant, so it
+    # must not be reported as a warning: the shipped default model is a Q4_0
+    # QAT release, and shipping MODEL_QUANT=Q4_K_M made every fresh install
+    # print a scare about the model it had just picked. Only a change in bit
+    # width is worth a warning.
+    tag, _, _, sev = select_note(REPOS["split"], "Q4_K_M")
+    check("exact match produces no note at all", sev, "")
+    tag, _, _, sev = select_note(REPOS["e2b"], "Q4_K_M")
+    check("Q4_K -> Q4_K_P sibling is informational", sev, "info")
+    tag, _, _, sev = select_note(REPOS["split"], "Q8_0")
+    check("exact Q8_0 match produces no note", sev, "")
+    tag, _, _, sev = select_note(REPOS["untagged"], "Q3_K_M")
+    check("bit-width change is still a warning", sev, "warn")
 
     print(f"\n  {PASSED} passed, {FAILED} failed\n")
     return 1 if FAILED else 0

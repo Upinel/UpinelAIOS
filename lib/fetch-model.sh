@@ -177,13 +177,20 @@ if families:
 
     # Never substitute silently: a different quant is a different memory
     # footprint and a different quality, and the caller should know.
+    #
+    # But not every substitution deserves a warning. Landing on a different
+    # sub-variant at the same bit width (Q4_K_M -> Q4_0 on a QAT-only repo) is
+    # what the request meant in substance; a different bit width is not. The
+    # severity is emitted here and applied by the shell, so a fresh install of
+    # the default model stops reporting a scare about the model it ships.
     if pick_tag != pref:
-        if quant_family(pick_tag) != quant_family(pref):
-            print(f"{pref} is not published here; using {pick_tag} instead",
-                  file=sys.stderr)
+        same_family = quant_family(pick_tag) == quant_family(pref)
+        if same_family:
+            msg = f"{pref} is not published here; using its sibling {pick_tag} instead"
         else:
-            print(f"{pref} is not published here; using its sibling "
-                  f"{pick_tag} instead", file=sys.stderr)
+            msg = f"{pref} is not published here; using {pick_tag} instead"
+        same_bits = bits_of(quant_family(pick_tag)) == bits_of(quant_family(pref))
+        print(f"{'info' if same_bits else 'warn'}\t{msg}", file=sys.stderr)
 
 for n, s in gguf:
     if is_aux(n):
@@ -209,7 +216,14 @@ rm -f "$DEST/.quant" "$DEST/.quant.note"
 if [[ -n "$CHOSEN" ]]; then
   info "quant ${CHOSEN} selected - fetching $COUNT files, $TOTAL GB"
   info "other quants in this repo are skipped (set MODEL_QUANT to change)"
-  [[ -n "$NOTE" ]] && warn "$NOTE"
+  # The note carries its own severity from the selector: same bit width is
+  # informational, a different bit width is a warning.
+  case "$NOTE" in
+    warn$'\t'*) warn "${NOTE#*$'\t'}" ;;
+    info$'\t'*) info "${NOTE#*$'\t'}" ;;
+    "")         ;;
+    *)          warn "$NOTE" ;;
+  esac
 else
   info "$COUNT files, $TOTAL GB to fetch"
 fi

@@ -110,6 +110,6 @@ print(json.dumps({
 }))
 PY
 )"
-export MTPLX_DASH_CFG="$CONFIG_JSON"
+export LLAMA_DASH_CFG="$CONFIG_JSON"
 
 exec python3 "$REPO_DIR/lib/dashboard.py" "$@"

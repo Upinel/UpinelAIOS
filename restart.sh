@@ -7,9 +7,9 @@
 #   ./restart.sh --print      show what would start, and whether config changed
 #
 # Editing env.conf has no effect until the server is restarted, because the
-# settings are passed to MTPLX as command-line arguments at launch. This script
-# is the supported way to apply them, and it tells you which settings actually
-# changed rather than leaving you to diff the file by hand.
+# settings are passed to llama-server as command-line arguments at launch. This
+# script is the supported way to apply them, and it tells you which settings
+# actually changed rather than leaving you to diff the file by hand.
 
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/common.sh"
 load_config

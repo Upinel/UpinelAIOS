@@ -62,21 +62,21 @@ fi
 if (( DO_MODEL || DO_TUNE )); then
   log ""
   log "  Serving:  $MODEL_REPO"
-  log "  Context:  $CONTEXT_WINDOW tokens   KV: $KV_QUANT   profile: $PROFILE"
+  log "  Context:  $CONTEXT_WINDOW tokens   KV: $KV_QUANT   MTP depth: $MTP_DEPTH"
 fi
 
 # ── 2. dependencies ──────────────────────────────────────────────────────────
 if (( DO_DEPS )); then
-  step "Installing the MTPLX runtime"
+  step "Installing the llama.cpp runtime"
 
   if command -v llama-server >/dev/null 2>&1; then
-    ok "llama.cpp already installed: $(llama-server --version 2>/dev/null | head -1)"
+    ok "llama.cpp already installed: $(llama_version)"
   else
     require_bin brew "Install Homebrew from https://brew.sh, then re-run ./install.sh"
     info "brew install llama.cpp"
     brew install llama.cpp
   fi
-  ok "llama.cpp ready: $(llama-server --version 2>/dev/null | head -1)"
+  ok "llama.cpp ready: $(llama_version)"
 
   command -v python3 >/dev/null 2>&1 || warn "python3 not found - ./bench/bench.sh needs it."
 

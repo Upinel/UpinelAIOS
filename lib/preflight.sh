@@ -32,10 +32,10 @@ scan_hardware() {
   HW_WEIGHTS_GB="$(model_weights_gb)"
 
   # Is the runtime installed?
-  HW_MTPLX="not installed"
+  HW_LLAMA="not installed"
   if command -v llama-server >/dev/null 2>&1; then
-    HW_MTPLX="$(llama-server --version 2>/dev/null | head -1 | sed 's/^version: //')"
-    [[ -n "$HW_MTPLX" ]] || HW_MTPLX="installed"
+    HW_LLAMA="$(llama_version)"
+    [[ -n "$HW_LLAMA" ]] || HW_LLAMA="installed"
   fi
   HW_BREW="no"; command -v brew >/dev/null 2>&1 && HW_BREW="yes"
 }
@@ -50,7 +50,7 @@ print_hardware() {
   printf '  %-16s %s\n' "unified memory" "${HW_RAM_GB} GB"
   printf '  %-16s %s\n' "macOS"       "$HW_MACOS  ($HW_MODEL_ID)"
   printf '  %-16s %s\n' "free disk"   "${HW_FREE_GB} GB"
-  printf '  %-16s %s\n' "llama.cpp"   "$HW_MTPLX"
+  printf '  %-16s %s\n' "llama.cpp"   "$HW_LLAMA"
   printf '  %-16s %s\n' "model on disk" "$HW_MODEL_PRESENT$([[ "$HW_MODEL_PRESENT" == yes ]] && echo " (${HW_WEIGHTS_GB} GB measured)")"
 
   # The single most useful hardware signal for this workload is memory
@@ -68,8 +68,8 @@ print_hardware() {
 #   * decode needs the weights resident, so MEMORY_LIMIT_GB must clear
 #     weights + KV + ~6 GB of activations
 #   * KV costs 64/34/18 KB per token for f16/q8/q4 (only 16 of 64 layers cache)
-#   * the session bank is the biggest allocator after the weights, and MTPLX
-#     auto-sizes it far too generously on a shared desktop
+#   * the KV cache is the second allocator after the weights, and on the Qwen
+#     models - which cache KV on every layer - it can outgrow the weights
 recommend_config() {
   local ram="$HW_RAM_GB"
 
@@ -126,16 +126,15 @@ recommend_config() {
   # silently recommend more memory than the machine has.
   (( REC_MEMORY_LIMIT_GB >= 4 )) || REC_MEMORY_LIMIT_GB=4
 
-  # Session bank: a fraction of RAM, capped. MTPLX's own auto-sizing picked
-  # 16.6 GB on a 64 GB Mac, which pushed wired memory to ~50 GB.
-  # Speculative depth. 1 is the measured optimum at agent context lengths;
-  # deeper drafting peaks on short prompts and collapses past ~8k.
+  # Prefill chunk. Keep each Metal allocation small at long context; this is
+  # what prevents the command-buffer OOM that the tuning sweep also guards on.
   REC_PREFILL_CHUNK=512
 
-  # Profile: sustained is memory-safe at long context; turbo is faster but only
-  # if you stay short.
-  REC_PROFILE="llama.cpp"
-  REC_REASON_PROFILE="llama.cpp is the only runtime that can serve uncensored Gemma 4 at speed"
+  # Runtime. There is only one candidate here - llama.cpp - so this is not a
+  # choice, it is the row that says why the other sister project's runtime
+  # cannot serve these models at all.
+  REC_RUNTIME="llama.cpp"
+  REC_REASON_RUNTIME="llama.cpp is the only runtime that can serve uncensored Gemma 4 at speed"
 
   # Model + KV + activation headroom, for the fit check.
   local kv_kb; kv_kb="$(kv_kb_per_token_f16 "$REC_MODEL")"
@@ -205,7 +204,7 @@ print_recommendation() {
   row "MEMORY_LIMIT_GB"    "$MEMORY_LIMIT_GB"    "$REC_MEMORY_LIMIT_GB"
 
   row "PREFILL_CHUNK_TOKENS" "$PREFILL_CHUNK_TOKENS" "$REC_PREFILL_CHUNK"
-  row "RUNTIME"            "llama.cpp"            "$REC_PROFILE"
+  row "RUNTIME"            "llama.cpp"            "$REC_RUNTIME"
 
   if [[ "$MODEL" != "$REC_MODEL" ]]; then
     log ""
@@ -218,7 +217,7 @@ print_recommendation() {
   log "  ${C_BOLD}Why these values:${C_RESET}"
   log "    model    $REC_REASON_MODEL"
   log "    context  $REC_REASON_CTX"
-  log "    profile  $REC_REASON_PROFILE"
+  log "    runtime  $REC_REASON_RUNTIME"
   log ""
   log "  Projected footprint: ${REC_WEIGHTS_GB} GB weights + ${REC_KV_GB} GB KV ($REC_KV)"
   log "                       = ${REC_NEED_GB} GB of a ${REC_MEMORY_LIMIT_GB} GB cap on ${HW_RAM_GB} GB of RAM"

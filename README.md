@@ -264,9 +264,11 @@ same model, and the `31b-heretic` repo carries ten of them — 232 GB in total,
 of which the 18.7 GB `Q4_K_M` is the one that fits a Mac. Fetching the repo
 wholesale would cost twelve times the disk and hours of download, so
 UpinelAIOS-GGUF picks a single quant (`MODEL_QUANT` in `env.conf`, default
-`Q4_K_M`) and skips the rest. The sizes above are what actually lands on disk:
-that quant, plus the vision projector and the MTP draft head, which are
-separate artifacts rather than quants and are always fetched.
+`Q4_0`, matching the default model's QAT release) and skips the rest. If the
+model you switch to does not publish that quant, the closest one at the same bit
+width is used and `model_download.sh` says which. The sizes above are what
+actually lands on disk: that quant, plus the vision projector and the MTP draft
+head, which are separate artifacts rather than quants and are always fetched.
 
 ```bash
 ./bench/verify-tools.sh            # check tool calling, measure a file write

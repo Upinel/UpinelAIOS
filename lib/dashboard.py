@@ -1663,7 +1663,7 @@ def main():
         print(__doc__)
         return 0
 
-    cfg = json.loads(os.environ["MTPLX_DASH_CFG"])
+    cfg = json.loads(os.environ["LLAMA_DASH_CFG"])
     dash = Dashboard(cfg, args)
 
     if args.once or args.json:

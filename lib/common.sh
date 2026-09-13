@@ -172,6 +172,21 @@ require_macos() {
   (( major >= 14 )) || die "macOS $v detected. Apple Silicon inference needs macOS 14 or newer."
 }
 
+# Version of the llama.cpp runtime, or empty when it is not installed.
+#
+# Two traps, both of which produced a silently blank version everywhere this
+# was done inline:
+#
+#   * llama-server prints --version to STDERR, so `2>/dev/null` throws away the
+#     only thing the call exists to read;
+#   * `| head -1` closes the pipe early, and under `set -o pipefail` that fails
+#     the whole pipeline. sed reads to EOF instead, so nothing is left holding
+#     a SIGPIPE.
+llama_version() {
+  command -v llama-server >/dev/null 2>&1 || return 0
+  llama-server --version 2>&1 | sed -n '1s/^version: //p'
+}
+
 require_bin() {
   command -v "$1" >/dev/null 2>&1 || die "'$1' not found on PATH. $2"
 }
