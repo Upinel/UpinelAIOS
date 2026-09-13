@@ -205,36 +205,35 @@ plain autoregressive (65 t/s against 70) on this workload.
 
 ## Thinking has a real token budget
 
-**Correction to earlier versions of this file:** it claimed llama.cpp cannot cap
-thinking, and that `minimal`/`low`/`high` were decorative labels all meaning
-"on". That was wrong. llama.cpp has `--reasoning-budget N`, a hard cap on the
-thought channel, plus `--reasoning-budget-message` injected as the cap is
-reached. The levels below are real budgets.
+llama.cpp has `--reasoning-budget N` — a hard cap on the thought channel — plus
+`--reasoning-budget-message` injected as the cap is reached. The levels in
+`env.conf` are real budgets.
 
-Eight agent tasks, greedy sampling, median completion tokens per turn and
-tool-call correctness:
+Measured on the default **26B-A4B**, eight agent tasks, greedy sampling:
 
-| `THINKING` | budget | tokens/turn | correct |
-|---|---:|---:|---:|
-| `off` | — | 133 | 8/8 |
-| **`minimal`** (default) | **32** | **72** | **8/8** |
-| `low` | 128 | 170 | 7/8 |
-| `medium` | 512 | 288 | 8/8 |
-| `high` | unlimited | 288 | 8/8 |
+| setting | budget | tokens/turn | thinking | correct |
+|---|---:|---:|---:|---:|
+| **`off`** (default) | — | **16** | 0 | 8/8 |
+| unlimited | — | 58 | 32 | 8/8 |
+| `minimal` + msg | 32 | 70 | 58 | 8/8 |
+| `low` + msg | 128 | 58 | 32 | 8/8 |
+| `medium` + msg | 512 | 58 | 32 | 8/8 |
 
-`minimal` is the cheapest of all — **cheaper than turning thinking off**. With
-no thought channel the model simply reasons inside its answer, which costs more;
-given a small budget it plans briefly and then acts. It also keeps every task
-correct.
+**This model does not overthink tool-calling work.** It reasons for roughly 32
+tokens and then acts, so a 32-token cap never binds and the budget message ends
+up costing more than it saves (70 tokens against 58 uncapped). The 128 and 512
+budgets never engage at all.
 
-**The budget message is not optional.** Every budgeted value tested *without* it
-scored 7/8: the thought channel gets cut mid-sentence and the model never gets
-round to emitting a tool call at all. With the message, every budget scored 8/8.
-If you set a budget, keep a message.
+So the levels are there for genuinely hard work, not for trimming routine
+turns — on routine turns `off` is 16 tokens against 58.
 
-> Budgets are sensitive to where the cut lands — 96 scored 7/8 while both 32 and
-> 128 scored 8/8 — so these are measured points, not a formula. Re-run
-> `bench/thinking-budget-test.py` after changing models or prompts.
+> **Correction.** An earlier version of this section reported a very different
+> table, including a claim that a small budget beat thinking-off. Those numbers
+> were measured **on the wrong model**: the benchmark resolved its model by
+> taking the first directory under `models/`, so once a second model was
+> downloaded it silently benchmarked a 2B model while the docs described a 26B
+> one. Both bench scripts now resolve the model through `env.conf`, the same
+> path `start.sh` uses. If you have older numbers from these tools, re-run them.
 
 ## Measuring this yourself
 
@@ -352,20 +351,19 @@ THINKING_BUDGET_MESSAGE="..."   # injected as the budget runs out
 ```
 
 Each level is a real token cap on the thought channel, applied with llama.cpp's
-`--reasoning-budget`. `minimal` (32 tokens) is the default and measured cheaper
-than `off`, while keeping every task correct — see
+`--reasoning-budget`. `off` remains the default because on routine tool-calling
+work the 26B reasons for only ~32 tokens anyway, so a budget buys nothing — see
 [Thinking has a real token budget](#thinking-has-a-real-token-budget).
 
-**Keep `THINKING_BUDGET_MESSAGE` set.** Removing it costs accuracy: every
-budgeted level scored 7/8 without it against 8/8 with it, because a thought cut
-off mid-sentence leaves the model without a tool call.
-
-Set `THINKING_BUDGET_TOKENS` to override a level without editing the mapping —
-useful for a one-off hard task:
+Reach for `low` or `medium` on genuinely hard work where you want the model to
+think at length; for a one-off without editing the file:
 
 ```bash
 THINKING=high THINKING_BUDGET_TOKENS=1024 ./restart.sh
 ```
+
+Keep `THINKING_BUDGET_MESSAGE` set if you use a budget that actually binds —
+a thought cut off mid-sentence can leave the model without a tool call.
 
 ## Quick start
 

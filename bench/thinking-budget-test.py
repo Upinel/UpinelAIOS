@@ -50,27 +50,26 @@ def env_conf():
 
 
 def model_paths():
-    base = os.path.join(REPO, "models")
-    d = None
-    for name in sorted(os.listdir(base)):
-        p = os.path.join(base, name)
-        if os.path.isdir(p) or os.path.islink(p):
-            d = p
-            break
-    main = draft = mmproj = None
-    for root, _dirs, files in os.walk(d, followlinks=True):
-        for f in sorted(files):
-            if not f.endswith(".gguf"):
-                continue
-            low = f.lower()
-            p = os.path.join(root, f)
-            if "mmproj" in low:
-                mmproj = p
-            elif "mtp" in low or "draft" in low:
-                draft = p
-            elif main is None:
-                main = p
-    return main, draft, mmproj
+    """Resolve the model from env.conf, not by directory order.
+
+    "First directory under models/" silently switched which model was being
+    measured once a second model was downloaded, which is exactly how a round
+    of thinking-budget numbers ended up describing a 2B model as the 26B
+    default.
+    """
+    cmd = ("source lib/common.sh >/dev/null 2>&1; load_config >/dev/null 2>&1; "
+           'echo "$MODEL_DIR"; '
+           'model_main_gguf "$MODEL_DIR" 2>/dev/null || true; '
+           'model_draft_gguf "$MODEL_DIR" 2>/dev/null || true; '
+           'model_mmproj_gguf "$MODEL_DIR" 2>/dev/null || true')
+    out = subprocess.run(["bash", "-c", cmd], cwd=REPO,
+                         capture_output=True, text=True)
+    lines = [l.strip() for l in out.stdout.split("\n") if l.strip()]
+    if len(lines) < 2:
+        sys.exit("could not resolve a model from env.conf - is one downloaded?")
+    return (lines[1],
+            lines[2] if len(lines) > 2 else None,
+            lines[3] if len(lines) > 3 else None)
 
 
 # A mix of tasks: some genuinely need a step of reasoning, some do not. A

@@ -56,28 +56,29 @@ def env_conf():
 
 
 def ggufs(cfg):
-    d = os.path.join(cfg.get("MODELS_DIR", os.path.join(REPO, "models")),
-                     cfg["MODEL"].replace("/", "--"))
-    if not os.path.isdir(d):
-        # Aliases map to repos; fall back to whatever is on disk.
-        base = os.path.join(REPO, "models")
-        for name in sorted(os.listdir(base)):
-            if os.path.isdir(os.path.join(base, name)) or os.path.islink(os.path.join(base, name)):
-                d = os.path.join(base, name)
-                break
-    main = draft = mmproj = None
-    for root, _dirs, files in os.walk(d, followlinks=True):
-        for f in sorted(files):
-            if not f.endswith(".gguf"):
-                continue
-            low = f.lower()
-            p = os.path.join(root, f)
-            if "mmproj" in low:
-                mmproj = p
-            elif "mtp" in low or "draft" in low:
-                draft = p
-            elif main is None:
-                main = p
+    """Resolve the model env.conf actually selects.
+
+    This used to fall back to "the first directory under models/", which
+    silently changed which model was benchmarked the moment a second one was
+    downloaded - a round of thinking-budget numbers was measured on a 2B model
+    that way while the docs described them as the 26B default. Resolution now
+    goes through the same code path start.sh uses.
+    """
+    cmd = ("source lib/common.sh >/dev/null 2>&1; load_config >/dev/null 2>&1; "
+           'echo "$MODEL_DIR"; '
+           'model_main_gguf "$MODEL_DIR" 2>/dev/null || true; '
+           'model_draft_gguf "$MODEL_DIR" 2>/dev/null || true; '
+           'model_mmproj_gguf "$MODEL_DIR" 2>/dev/null || true')
+    out = subprocess.run(["bash", "-c", cmd], cwd=REPO,
+                         capture_output=True, text=True)
+    lines = [l.strip() for l in out.stdout.split("\n") if l.strip()]
+    if not lines:
+        sys.exit("could not resolve a model from env.conf - is one downloaded?")
+    main = lines[1] if len(lines) > 1 else None
+    draft = lines[2] if len(lines) > 2 else None
+    mmproj = lines[3] if len(lines) > 3 else None
+    if not main:
+        sys.exit(f"no main .gguf under {lines[0]}")
     return main, draft, mmproj
 
 
@@ -110,11 +111,36 @@ CONFIGS = [
     ("d1b", "depth 1 (B)", {"__depth": "1"}),
     ("d3b", "depth 3 (B)", {"__depth": "3"}),
     ("threads", "explicit thread count", {"-t": "8"}),
+
+    # ── decode levers ────────────────────────────────────────────────────────
+    # Decode at depth 3 sits well below the memory-bandwidth ceiling, which
+    # means the cost is draft and verify overhead rather than weight reads.
+    # These attack that overhead instead of the weights.
+    ("d3", "depth 3, the shipped setting", {"__depth": "3"}),
+    ("pmin", "skip drafts below 50% confidence",
+     {"__depth": "3", "--spec-draft-p-min": "0.5"}),
+    ("pmin8", "skip drafts below 80% confidence",
+     {"__depth": "3", "--spec-draft-p-min": "0.8"}),
+    ("dkvq8", "quantise the DRAFT model's own KV cache",
+     {"__depth": "3", "--spec-draft-type-k": "q8_0", "--spec-draft-type-v": "q8_0"}),
+    ("dkvq4", "draft KV at q4_0",
+     {"__depth": "3", "--spec-draft-type-k": "q4_0", "--spec-draft-type-v": "q4_0"}),
+    ("td4", "fewer CPU threads for drafting", {"__depth": "3", "-td": "4"}),
+    ("ncmoe8", "MoE experts of the first 8 layers kept on CPU",
+     {"__depth": "3", "-ncmoe": "8"}),
+    ("ncmoe16", "MoE experts of the first 16 layers kept on CPU",
+     {"__depth": "3", "-ncmoe": "16"}),
+    ("mtpngram", "MTP plus an ngram drafter",
+     {"__depth": "3", "__spec": "draft-mtp,ngram-simple"}),
+    ("ngramk", "MTP plus the map-k ngram drafter",
+     {"__depth": "3", "__spec": "draft-mtp,ngram-map-k"}),
+    ("ngramonly", "ngram only, no MTP", {"__spec": "ngram-simple"}),
 ]
 
 
 def build_args(main, draft, mmproj, cfg, overrides, port):
     depth = overrides.pop("__depth", "1")
+    spec = overrides.pop("__spec", "draft-mtp")
     ctx = cfg.get("CONTEXT_WINDOW", "131072")
     args = [
         "llama-server", "-m", main, "-ngl", "all", "-fa", "on",
@@ -131,9 +157,15 @@ def build_args(main, draft, mmproj, cfg, overrides, port):
     ]
     if mmproj and os.environ.get("SWEEP_VISION") == "1":
         args += ["--mmproj", mmproj]
-    if depth not in ("0", 0) and draft:
-        args += ["-md", draft, "--spec-type", "draft-mtp",
-                 "--spec-draft-n-max", str(depth), "--spec-draft-ngl", "all"]
+    # --spec-type takes a comma-separated LIST, so MTP can run alongside an
+    # ngram drafter rather than being replaced by it.
+    uses_draft = draft and any(s.startswith("draft-") for s in spec.split(","))
+    if spec and spec != "none":
+        if uses_draft:
+            args += ["-md", draft, "--spec-type", spec,
+                     "--spec-draft-n-max", str(depth), "--spec-draft-ngl", "all"]
+        else:
+            args += ["--spec-type", spec]
     for k, v in overrides.items():
         args += [k, str(v)]
     return args
