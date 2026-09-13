@@ -76,18 +76,23 @@ recommend_config() {
   # Gemma 4 26B-A4B is a mixture-of-experts model: 26B total but only ~4B
   # active per token, so it is both the fastest big model and the one that
   # comfortably fits a 32 GB Mac.
+  #
+  # This recommends the alias 26b-q4, not the Q4_K_M build of the same model.
+  # Same weights, but Q4_0 QAT is ~22% faster to decode on Metal (119 vs 97
+  # t/s measured) and 15% smaller. Recommending the K-quant here would hand a
+  # fresh install a slower model than the one start.sh defaults to.
   if (( ram >= 48 )); then
-    REC_MODEL="HauhauCS/Gemma4-26B-A4B-QAT-Uncensored-HauhauCS-Balanced-MTP"
-    REC_WEIGHTS_GB=17
-    REC_REASON_MODEL="26B-A4B is the quality pick: MoE, ~4B active per token, uncensored"
+    REC_MODEL="$(model_repo_for 26b-q4)"
+    REC_WEIGHTS_GB=15
+    REC_REASON_MODEL="26B-A4B Q4_0 QAT is the quality pick: MoE, ~4B active per token, uncensored, and the fastest thing that runs here"
   elif (( ram >= 16 )); then
-    REC_MODEL="HauhauCS/Gemma4-12B-QAT-Uncensored-HauhauCS-Balanced"
+    REC_MODEL="$(model_repo_for 12b)"
     REC_WEIGHTS_GB=8
-    REC_REASON_MODEL="12B fits ${ram} GB comfortably; the 26B-A4B wants ~20 GB resident"
+    REC_REASON_MODEL="12B fits ${ram} GB comfortably; the 26B MoE wants ~16 GB resident before context"
   else
-    REC_MODEL="HauhauCS/Gemma-4-E2B-Uncensored-HauhauCS-Aggressive"
+    REC_MODEL="$(model_repo_for e2b)"
     REC_WEIGHTS_GB=4
-    REC_REASON_MODEL="${ram} GB is tight, but E2B needs only 4.2 GB resident and is the fastest model here (~107 t/s on the reference Mac)"
+    REC_REASON_MODEL="${ram} GB is tight; E2B is the only model here that fits, at ~4.2 GB resident, and it still decodes at ~107 t/s"
   fi
 
   # Context and KV quant together have to fit the memory budget.
@@ -162,6 +167,16 @@ current_config_fits() {
 }
 
 # ── display ──────────────────────────────────────────────────────────────────
+# Reverse-map a repo id back to its alias, so the picker can mark the
+# recommended one. Empty when the repo is not a known alias.
+alias_for_repo() {
+  local a
+  for a in $MODEL_ALIASES; do
+    [[ "$(model_repo_for "$a" 2>/dev/null)" == "$1" ]] && { echo "$a"; return; }
+  done
+  echo ""
+}
+
 print_recommendation() {
   log ""
   printf '  %-24s %-34s %s\n' "SETTING" "CURRENT (env.conf)" "SUGGESTED"
@@ -247,6 +262,108 @@ PY
   load_config
 }
 
+
+# ── per-model fit, for the picker ────────────────────────────────────────────
+# Download size in GB for each known repo. These are what lands on disk
+# (weights + projector + draft), not the weight file alone.
+model_size_gb() {
+  case "$1" in
+    *q4_0-heretic*)                         echo 15 ;;
+    *Gemma4-26B-A4B*)                       echo 18 ;;
+    *Gemma4-12B*)                           echo 8  ;;
+    *gemma-4-31B*)                          echo 20 ;;
+    *Gemma-4-E4B*)                          echo 6  ;;
+    *Gemma-4-E2B*)                          echo 4  ;;
+    *Qwen3.8-27B*)                          echo 19 ;;
+    *Qwen3.8-9B*)                           echo 6  ;;
+    *Qwen3.6-35B*)                          echo 22 ;;
+    *)                                      echo 0  ;;
+  esac
+}
+
+# One-line note about a model, shown beside its verdict.
+model_note() {
+  case "$1" in
+    26b-q4)      echo "uncensored MoE, 3B active - the fastest 26B here" ;;
+    26b-a4b)     echo "same MoE in Q4_K_M: about 20% slower, 3 GB bigger" ;;
+    12b)         echo "dense 12B - smaller and less capable, still quick" ;;
+    31b-heretic) echo "dense 31B abliterated - the highest quality, and the slowest" ;;
+    e4b)         echo "loses to both e2b and the 26B on every axis" ;;
+    e2b)         echo "smallest, and the fastest small model: fits an 8 GB Mac" ;;
+    qwen-27b)    echo "dense 27B, ~14 t/s; its MTP head needs a build step (docs/GGUF-RUNTIME.md)" ;;
+    qwen-9b)     echo "dense 9B, ~41 t/s - no MTP head, so no speculative speedup" ;;
+    qwen-35b)    echo "MoE like the default, different family (Qwen 3.6, not 3.8)" ;;
+    *)           echo "" ;;
+  esac
+}
+
+# What this model would actually cost on THIS machine, and whether it fits.
+# Prints "<need> <verdict>".
+model_fit() {
+  # Named _mf rather than "alias": alias is a bash builtin, and shadowing it
+  # in a function that other code may call is asking for trouble.
+  local _mf="$1" size_kb kv_gb need_gb
+  size_kb="$(model_size_gb "$(model_repo_for "$_mf" 2>/dev/null)")"
+  (( size_kb > 0 )) || { echo "? unknown"; return; }
+  # KV for this model at the recommended context, scaled by the quant.
+  local per_tok; per_tok="$(kv_kb_per_token_f16 "$(model_repo_for "$_mf" 2>/dev/null)")"
+  local kb=$(( REC_CONTEXT * per_tok ))
+  case "$REC_KV" in
+    q8*) kb=$(( kb / 2 )) ;;
+    q4*) kb=$(( kb / 4 )) ;;
+  esac
+  kv_gb=$(( kb / 1024 / 1024 ))
+  need_gb=$(( size_kb + kv_gb + 3 ))
+
+  local verdict
+  if [[ -n "$REC_ALIAS" && "$_mf" == "$REC_ALIAS" ]]; then
+    verdict="RECOMMENDED"
+  elif (( need_gb + 4 <= HW_RAM_GB )); then
+    verdict="fits comfortably"
+  elif (( need_gb <= HW_RAM_GB )); then
+    verdict="tight - expect paging"
+  else
+    verdict="will not fit"
+  fi
+  echo "${need_gb} ${verdict}"
+}
+
+# Numbered picker. Echoes the chosen alias, or nothing to keep the current one.
+print_model_menu() {
+  log ""
+  log "  ${C_BOLD}Pick a model${C_RESET}   ${C_DIM}this Mac has ${HW_RAM_GB} GB of unified memory${C_RESET}"
+  log ""
+  printf '  %3s  %-12s %-6s %-20s %s\n' "#" "ALIAS" "SIZE" "VERDICT" "NOTE"
+  printf '  %3s  %-12s %-6s %-20s %s\n' "---" "------------" "------" "--------------------" "----------------------------------------"
+
+  local i=1 alias fit need verdict note colour
+  MODEL_MENU_ALIASES=""
+  for alias in $MODEL_ALIASES; do
+    fit="$(model_fit "$alias")"
+    need="${fit%% *}"; verdict="${fit#* }"
+    note="$(model_note "$alias")"
+    case "$verdict" in
+      RECOMMENDED)        colour="$C_GREEN"  ;;
+      fits\ comfortably) colour=""           ;;
+      tight*)             colour="$C_YELLOW" ;;
+      will\ not\ fit)    colour="$C_RED"    ;;
+      *)                  colour="$C_DIM"    ;;
+    esac
+    printf '  %3d  %-12s %-6s %s%-20s%s %s%s%s\n' \
+      "$i" "$alias" "$(model_size_gb "$(model_repo_for "$alias" 2>/dev/null)") GB" \
+      "$colour" "$verdict" "$C_RESET" "$C_DIM" "$note" "$C_RESET"
+    MODEL_MENU_ALIASES="$MODEL_MENU_ALIASES $alias"
+    i=$(( i + 1 ))
+  done
+
+  log ""
+  log "  ${C_DIM}Enter a number, or press Enter to keep your current model.${C_RESET}"
+  log "  ${C_DIM}A model that will not fit can still be chosen - it will just be slow,${C_RESET}"
+  log "  ${C_DIM}or fail to load. ./model_download.sh fetches it afterwards.${C_RESET}"
+  log ""
+  printf '  Model number: '
+}
+
 # ── the interactive step ─────────────────────────────────────────────────────
 # Returns 0 if config is ready to use, 1 if the user aborted.
 run_preflight() {
@@ -257,6 +374,7 @@ run_preflight() {
   print_hardware
 
   recommend_config
+  REC_ALIAS="$(alias_for_repo "$REC_MODEL")"
   print_recommendation
 
   # Disk space for the download, only if it is not already there.
@@ -309,7 +427,50 @@ run_preflight() {
   local reply=""
   read -r reply < /dev/tty || reply=""
   case "$reply" in
-    n|N|no|NO) info "Keeping your current env.conf." ;;
+    n|N|no|NO)
+      # Declining the whole suggestion usually means "not that model". Offer
+      # the list with a per-machine verdict rather than just giving up.
+      print_model_menu
+      local pick=""
+      read -r pick < /dev/tty || pick=""
+      pick="${pick//[!0-9]/}"
+      if [[ -z "$pick" ]]; then
+        info "Keeping your current env.conf."
+        return 0
+      fi
+      local idx=1 chosen="" a
+      for a in $MODEL_MENU_ALIASES; do
+        if (( idx == pick )); then chosen="$a"; break; fi
+        idx=$(( idx + 1 ))
+      done
+      if [[ -z "$chosen" ]]; then
+        warn "No model number $pick; keeping your current env.conf."
+        return 0
+      fi
+      local fit verdict wgb
+      fit="$(model_fit "$chosen")"; verdict="${fit#* }"
+      REC_MODEL="$(model_repo_for "$chosen")"
+      REC_ALIAS="$chosen"
+      wgb="$(model_size_gb "$REC_MODEL")"
+      log ""
+      if [[ "$verdict" == "will not fit" ]]; then
+        warn "$chosen needs about ${fit%% *} GB and this Mac has ${HW_RAM_GB} GB."
+        warn "It will be slow at best and may fail to load. Choosing it anyway."
+      elif [[ "$verdict" == tight* ]]; then
+        warn "$chosen needs about ${fit%% *} GB on a ${HW_RAM_GB} GB Mac - expect paging."
+      fi
+      # The disk check above ran against the SUGGESTED model's size, so a larger
+      # pick has to be re-checked or the download dies half way through.
+      if (( wgb > 0 )) && (( HW_FREE_GB < wgb + 3 )); then
+        warn "$chosen downloads about ${wgb} GB and only ${HW_FREE_GB} GB is free."
+        warn "Free up space, or set MODELS_DIR in env.conf to a bigger volume."
+        info "Keeping your current env.conf."
+        return 0
+      fi
+      info "Using $chosen. The other suggested settings still apply."
+      (( wgb > 0 )) && REC_WEIGHTS_GB="$wgb"
+      apply_config
+      ;;
     *)         apply_config ;;
   esac
   return 0

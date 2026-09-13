@@ -587,12 +587,34 @@ kv_gb_for_context() {
 }
 
 # Rough KV cost per token for the current model, in KB at f16.
+# KV cache growth per token, in KB, at f16. Divide by 2 for q8, by 4 for q4.
+#
+# These are computed from each model's own GGUF architecture, not guessed, and
+# the two families differ by more than an order of magnitude:
+#
+#   * Gemma 4 interleaves sliding-window attention (a 1024-token window on 25
+#     of 30 layers) with a few full-attention layers, so only those few grow
+#     with context. 26B-A4B costs ~20 KB/token, i.e. 1.3 GB at q8 over 131k.
+#   * Qwen 3.x is full attention on every layer. The 27B has 65 layers of
+#     4 KV heads at 256 wide, so ~260 KB/token - 17 GB at q8 over 131k, which
+#     is most of a 32 GB Mac before any weights are loaded.
+#
+# Getting this wrong in the low direction is what matters: an earlier version
+# of this table had no Qwen entries at all and fell through to a 64 KB default,
+# under-reporting the 27B by 4x and making a model that will not fit look
+# comfortable.
 kv_kb_per_token_f16() {
   case "$1" in
-    *26B-A4B*)  echo 64  ;;
-    *12B*)      echo 32  ;;
-    *31B*)      echo 80  ;;
-    *E4B*)      echo 16  ;;
-    *)          echo 64  ;;
+    # Gemma 4 - sliding-window attention, so growth is only the full layers.
+    *q4_0-heretic*|*26B-A4B*) echo 20 ;;   # 5 of 30 layers full, 2 KV heads x 512
+    *Gemma4-12B*)             echo 32 ;;   # 48 layers; estimate, not measured
+    *gemma-4-31B*)            echo 40 ;;   # 60 layers; estimate, not measured
+    *Gemma-4-E4B*)            echo 16 ;;
+    *Gemma-4-E2B*)            echo 16 ;;
+    # Qwen 3.x - full attention everywhere.
+    *Qwen3.8-27B*)            echo 260 ;;  # 65 layers, 4 KV x 256
+    *Qwen3.8-9B*)             echo 128 ;;  # 32 layers, 4 KV x 256
+    *Qwen3.6-35B*)            echo 192 ;;  # MoE, 48 layers; estimate, not measured
+    *)                        echo 64 ;;
   esac
 }
