@@ -581,7 +581,6 @@ roughly a quarter of an M5 Pro's bandwidth:
 | model | estimated decode on M1 |
 |---|---:|
 | `e2b` | ~25 t/s |
-| `26b-a4b` | ~20–22 t/s |
 | `e4b` | ~15 t/s |
 
 Treat those as order-of-magnitude. Even the pessimistic end is a usable agent
