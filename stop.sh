@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Stop the UpinelAIOS-G endpoint.
+# Stop the UpinelAIOS-GGUF endpoint.
 #
 #   ./stop.sh            graceful shutdown (recommended)
 #   ./stop.sh --force    SIGKILL - only if graceful stop hangs

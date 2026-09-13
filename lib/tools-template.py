@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate a tool-aware chat template for UpinelAIOS-G.
+"""Generate a tool-aware chat template for UpinelAIOS-GGUF.
 
 Why this exists
 ---------------

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Live dashboard for the UpinelAIOS-G endpoint: CPU, GPU, memory, and the
+# Live dashboard for the UpinelAIOS-GGUF endpoint: CPU, GPU, memory, and the
 # server's concurrent activity, refreshed in real time.
 #
 #   ./status.sh                live dashboard (Ctrl-C to exit)

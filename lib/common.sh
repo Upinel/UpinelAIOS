@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Shared helpers for UpinelAIOS-G.
+# Shared helpers for UpinelAIOS-GGUF.
 # Sourced by install.sh / start.sh / stop.sh / restart.sh / status.sh / bench.
 #
 # Bash 3.2 compatible on purpose: that is what ships on macOS, and this bundle
@@ -72,7 +72,7 @@ show_usage() {
 #
 # +22% decode, +15% prefill, 15% smaller. The existing MTP drafter works
 # with it unchanged; acceptance is slightly HIGHER than on Q4_K_M.
-MODEL_ALIASES="26b-q4 26b-a4b 12b 31b-heretic e4b e2b"
+MODEL_ALIASES="26b-q4 26b-a4b 12b 31b-heretic e4b e2b qwen-27b qwen-9b qwen-35b"
 
 model_repo_for() {
   case "$1" in
@@ -82,6 +82,16 @@ model_repo_for() {
     31b-heretic) echo "llmfan46/gemma-4-31B-it-uncensored-heretic-GGUF" ;;
     e4b)         echo "HauhauCS/Gemma-4-E4B-Uncensored-HauhauCS-Aggressive" ;;
     e2b)         echo "HauhauCS/Gemma-4-E2B-Uncensored-HauhauCS-Aggressive" ;;
+    # ── Qwen ─────────────────────────────────────────────────────────────────
+    # Same rule as the Gemma side: uncensored only. Qwen3.8 is served through
+    # llama.cpp like everything else here, so the family is just another set of
+    # registry entries rather than a second code path.
+    qwen-27b)    echo "HauhauCS/Qwen3.8-27B-Uncensored-HauhauCS-Aggressive-MTP-GGUF" ;;
+    qwen-9b)     echo "mradermacher/Qwen3.8-9B-heretic-uncensored-i1-GGUF" ;;
+    # Qwen never released a 3.8 35B-A3B. This is the HauhauCS uncensored 3.6
+    # 35B-A3B build - same MoE shape, nearest thing that exists. Named for what
+    # it is rather than mislabelled as 3.8.
+    qwen-35b)    echo "HauhauCS/Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive" ;;
     */*)         echo "$1" ;;
     *)           die "MODEL=\"$1\" is neither a known alias nor an owner/name repo id.
     Known aliases: $MODEL_ALIASES" ;;
@@ -90,8 +100,17 @@ model_repo_for() {
 
 model_is_known_alias() {
   case "$1" in
-    26b-q4|26b-a4b|12b|31b-heretic|e4b|e2b) return 0 ;;
+    26b-q4|26b-a4b|12b|31b-heretic|e4b|e2b|qwen-27b|qwen-9b|qwen-35b) return 0 ;;
     *) return 1 ;;
+  esac
+}
+
+# Which family an alias belongs to. Drives the chat-template handling and the
+# default quant, because the two families do not share either.
+model_family_for() {
+  case "$(model_repo_for "$1" 2>/dev/null)" in
+    *[Qq]wen*) echo "qwen" ;;
+    *)         echo "gemma" ;;
   esac
 }
 
@@ -116,7 +135,7 @@ load_config() {
   HOST="0.0.0.0"
   PORT=8000
   API_KEY_FILE="$REPO_DIR/run/api-key"
-  SERVED_MODEL_NAME="Upinel-AIOS-G"
+  SERVED_MODEL_NAME="Upinel-AIOS-GGUF"
   ENABLE_VISION=1
   PARALLEL_SLOTS=1
   FAN_MODE="default"
@@ -173,30 +192,59 @@ model_main_gguf() {
 # anchored mmproj*.gguf pattern silently found nothing for them.
 model_mmproj_gguf() {
   local dir="$1"
+  # `return 0` matters: callers run under `set -e`, and "no projector" is a
+  # normal result, not a failure. Without it a model with no mmproj aborts
+  # whatever script asked.
   find -L "$dir" -maxdepth 1 -iname '*.gguf' 2>/dev/null \
     | grep -iE 'mmproj' | head -1
+  return 0
 }
 
-# The MTP draft head, matched the same way. DRAFT_FILE in env.conf overrides.
+# The MTP draft head. DRAFT_FILE in env.conf overrides everything.
 #
-# Fallback: a repo may ship weights without the drafter. The Q4_0 QAT 26B does
-# exactly that, while the MTP head is a separate artifact that works across
-# quants of the same architecture - measured 82% acceptance against Q4_0,
-# slightly better than the 79% it gives against Q4_K_M. So when this model's
-# directory has no drafter, look for one elsewhere under models/ rather than
-# quietly running autoregressive and losing about a fifth of decode speed.
+# A repo may ship weights without the drafter - the Q4_0 QAT 26B does exactly
+# that - and the head is a separate artifact that transfers across quants of
+# the same architecture, so a miss is worth chasing elsewhere rather than
+# quietly running autoregressive and losing a fifth of decode speed.
+#
+# But it must stay inside the same model FAMILY. Pairing a Gemma MTP head with
+# a Qwen target loads without complaint and is silently wrong; that happened
+# while adding the Qwen entries, because the fallback searched all of models/.
+# So a draft found outside this model's own directory has to match its family.
+#
+# Draft files are named inconsistently across repos - mtp-*.gguf,
+# FastMTP-32K.gguf, *-draft.gguf - so match on the substring, not a prefix.
 model_draft_gguf() {
-  local dir="$1" hit=""
+  local dir="$1" hit="" fam=""
   if [[ -n "${DRAFT_FILE:-}" && -f "${DRAFT_FILE:-}" ]]; then
     echo "$DRAFT_FILE"
     return
   fi
-  hit="$(find -L "$dir" -maxdepth 1 -iname '*.gguf' 2>/dev/null \
-          | grep -iE '(^|/)(mtp|draft)[-_]' | head -1)"
-  if [[ -z "$hit" ]]; then
-    hit="$(find -L "$MODELS_DIR" -maxdepth 2 -iname 'mtp-*.gguf' 2>/dev/null | head -1)"
+
+  case "$(basename "$dir")" in
+    *[Qq]wen*)  fam="qwen"  ;;
+    *[Gg]emma*) fam="gemma" ;;
+  esac
+
+  # Match the BASENAME, not the whole path: the HauhauCS Gemma directory is
+  # literally named "...-MTP", so grepping the path made its vision projector
+  # look like a draft head.
+  hit="$(find -L "$dir" -maxdepth 1 \
+           \( -iname '*mtp*.gguf' -o -iname '*draft*.gguf' \) 2>/dev/null | head -1)"
+
+  if [[ -z "$hit" && -n "$fam" ]]; then
+    # Cross-directory, so gate on family: a Gemma head paired with a Qwen
+    # target loads without complaint and is silently wrong.
+    hit="$(find -L "$MODELS_DIR" -maxdepth 2 \
+             \( -iname '*mtp*.gguf' -o -iname '*draft*.gguf' \) 2>/dev/null \
+            | grep -i "$fam" | head -1)"
   fi
+
   [[ -n "$hit" ]] && echo "$hit"
+  # Always succeed. Callers run under `set -e`, and "this model has no draft
+  # head" is a normal answer, not a failure - returning 1 here aborted
+  # start.sh outright for every model without one.
+  return 0
 }
 
 model_present() {

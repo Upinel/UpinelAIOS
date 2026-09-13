@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# One-time setup for UpinelAIOS-G.
+# One-time setup for UpinelAIOS-GGUF.
 #
 #   ./install.sh                 scan hardware, suggest settings, install
 #   ./install.sh --yes           accept the suggested settings without asking
@@ -35,7 +35,7 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 
-step "UpinelAIOS-G - One-Click AI Agent Server OS for Mac, Gemma 4 edition"
+step "UpinelAIOS-GGUF - One-Click AI Agent Server OS for Mac, Gemma 4 edition"
 
 is_apple_silicon || die "This bundle targets Apple Silicon Macs. Detected: $(uname -s)/$(uname -m)."
 require_macos

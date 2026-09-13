@@ -7,7 +7,7 @@
 #   ./model_download.sh --switch 12b    download if needed, set it as the
 #                                       default in env.conf, and restart
 #
-# EVERY known model is an uncensored Gemma 4 fine-tune. UpinelAIOS-G does not
+# EVERY known model is an uncensored Gemma 4 fine-tune. UpinelAIOS-GGUF does not
 # ship or suggest aligned models.
 #
 # Downloads resume, so re-running after an interruption is safe and cheap.

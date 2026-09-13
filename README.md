@@ -1,22 +1,35 @@
-<h1 align="center">UpinelAIOS-G</h1>
+<h1 align="center">UpinelAIOS-GGUF</h1>
 
-<p align="center"><b>Upinel's One-Click AI Agent Server OS for Mac — Gemma 4 edition</b><br>
+<p align="center"><b>Upinel's One-Click AI Agent Server OS for Mac (GGUF)</b><br>
 A local, uncensored, OpenAI-compatible agent endpoint on your own Apple Silicon Mac.<br>
 One command to install. One command to serve. Your data never leaves the LAN.</p>
 
 ---
 
-A portable, one-command **Gemma 4 uncensored agent endpoint** for Apple Silicon
-Macs, tuned for maximum tokens/sec.
+> **Sister project: [UpinelAIOS-MLX](https://github.com/Upinel/UpinelAIOS-MLX)** —
+> the same one-click agent server built on **MLX/MTPLX** rather than llama.cpp.
+> That one drives Qwen through MTPLX's MTP speculative decoding; this one serves
+> anything GGUF on llama.cpp, which is the only runtime that can run an
+> uncensored Gemma 4 at all. Choose by what you want to serve — both are tuned
+> as far as their runtime allows.
+
+A portable, one-command **uncensored agent endpoint** for Apple Silicon Macs,
+tuned for maximum tokens/sec. Two model families ship in the box:
+
+| family | models | runtime |
+|---|---|---|
+| **Gemma 4** | `26b-q4` (default), `26b-a4b`, `12b`, `31b-heretic`, `e2b`, `e4b` | llama.cpp |
+| **Qwen 3.8** | `qwen-27b`, `qwen-9b`, `qwen-35b` | llama.cpp |
 
 Built and measured on an **M5 Pro / 20-core GPU / 64 GB**, serving
-`HauhauCS/Gemma4-26B-A4B-QAT-Uncensored-HauhauCS-Balanced-MTP` through
-llama.cpp with its companion draft model:
+`OS-Software/gemma-4-26B-A4B-it-qat-q4_0-heretic-ja-GGUF` through llama.cpp with
+a companion MTP draft model:
 
 ```
-88 t/s short-context decode      (uncensored, MoE, ~4B active per token)
-66 t/s at 8k context
-128K context default
+119 t/s decode at 2k context    (uncensored MoE, ~4B active per token)
+ 82 t/s decode at 16k context
+129 t/s prefill, 0.25 s warm TTFT
+256K context supported, 131K default
 OpenAI-compatible API on your LAN, plus vision when you want it
 ```
 
@@ -24,9 +37,9 @@ Clone it, run `./install.sh`, run `./start.sh`. Nothing else.
 
 ---
 
-## Why this is a separate project from UpinelAIOS
+## Why this is a separate project from UpinelAIOS-MLX
 
-The Qwen edition runs on **MTPLX** (MLX). Gemma 4 cannot, and the reason is
+The MLX edition runs on **MTPLX** (MLX). Gemma 4 cannot, and the reason is
 structural rather than a preference.
 
 Gemma 4 has no MTP head. MTPLX drives it through a **target/assistant pair** —
@@ -165,7 +178,7 @@ Run `python3 bench/cache-reuse-test.py` to see which of these your harness does.
 > Measured on the same 8k prompts: an early edit costs 9.40 s by default,
 > **12.11 s at `--cache-reuse 64`** and **14.54 s at `--cache-reuse 256`** —
 > and `cache_n` stays at 343 either way, so it buys no reuse at all, only KV
-> shifting work. UpinelAIOS-G deliberately does not set it.
+> shifting work. UpinelAIOS-GGUF deliberately does not set it.
 
 ## Speculative depth — the one speed knob that matters
 
@@ -368,7 +381,7 @@ a thought cut off mid-sentence can leave the model without a tool call.
 ## Quick start
 
 ```bash
-git clone https://github.com/upinel/UpinelAIOS-G && cd UpinelAIOS-G
+git clone https://github.com/upinel/UpinelAIOS-GGUF && cd UpinelAIOS-GGUF
 
 ./install.sh          # scans your Mac, suggests settings, installs everything
 ./start.sh            # serves http://<your-lan-ip>:8000/v1
@@ -381,7 +394,7 @@ Point any OpenAI-compatible client at the URL `./status.sh` prints.
 
 ## Models — uncensored only
 
-**Every model UpinelAIOS-G ships or suggests is an uncensored Gemma 4
+**Every model UpinelAIOS-GGUF ships or suggests is an uncensored Gemma 4
 fine-tune.** There is no point being fast at something that will not answer.
 
 | alias | download | repo |
@@ -416,7 +429,7 @@ acceptance than on Q4_K_M.
 same model, and the `31b-heretic` repo carries ten of them — 232 GB in total,
 of which the 18.7 GB `Q4_K_M` is the one that fits a Mac. Fetching the repo
 wholesale would cost twelve times the disk and hours of download, so
-UpinelAIOS-G picks a single quant (`MODEL_QUANT` in `env.conf`, default
+UpinelAIOS-GGUF picks a single quant (`MODEL_QUANT` in `env.conf`, default
 `Q4_K_M`) and skips the rest. The sizes above are what actually lands on disk:
 that quant, plus the vision projector and the MTP draft head, which are
 separate artifacts rather than quants and are always fetched.

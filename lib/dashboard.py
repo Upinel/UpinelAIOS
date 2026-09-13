@@ -60,7 +60,7 @@ HIDE_CURSOR, SHOW_CURSOR = "\033[?25l", "\033[?25h"
 # Window/tab title. OSC 0 sets icon + title, OSC 2 the window title; Terminal
 # and iTerm2 both honour them. Re-asserted every frame so nothing else can
 # claim the heading.
-WINDOW_TITLE = "UpinelAIOS-G Status"
+WINDOW_TITLE = "UpinelAIOS-GGUF Status"
 SET_TITLE = f"\033]0;{WINDOW_TITLE}\007\033]2;{WINDOW_TITLE}\007"
 CLEAR_TITLE = "\033]0;\007\033]2;\007"
 
@@ -1104,14 +1104,14 @@ class Dashboard:
         mm, ss = divmod(rem, 60)
 
         L = []
-        title = f"{BOLD}UpinelAIOS-G{RESET}"
+        title = f"{BOLD}UpinelAIOS-GGUF{RESET}"
         status = (f"{GREEN}\u25cf serving{RESET}" if s["server_up"]
                   else f"{RED}\u25cf not running{RESET}")
         clock = f"up {hh:02d}:{mm:02d}:{ss:02d}"
         pad = max(1, width - len(strip_ansi(title)) - len(strip_ansi(status))
                   - len(clock) - 4)
         L.append(f"{title}{' ' * pad}{status}  {DIM}{clock}{RESET}")
-        L.append(f"{DIM}  Upinel's One-Click AI Agent Server OS for Mac{RESET}")
+        L.append(f"{DIM}  Upinel's One-Click AI Agent Server OS for Mac (GGUF){RESET}")
         L.append(DIM + "\u2500" * width + RESET)
 
         key = cfg.get("api_key") or "(none - loopback only)"
@@ -1549,8 +1549,8 @@ class Dashboard:
 # ── one-shot report (previously status.sh) ───────────────────────────────────
 def print_once(cfg, snap):
     s = snap
-    print(f"\n{BOLD}UpinelAIOS-G{RESET} {DIM}- "
-          f"Upinel's One-Click AI Agent Server OS for Mac, Gemma 4 edition{RESET}\n")
+    print(f"\n{BOLD}UpinelAIOS-GGUF{RESET} {DIM}- "
+          f"Upinel's One-Click AI Agent Server OS for Mac (GGUF){RESET}\n")
 
     def line(label, value):
         print(f"  {label:<18} {value}")

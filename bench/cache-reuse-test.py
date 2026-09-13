@@ -83,7 +83,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--base", default="http://127.0.0.1:8000/v1")
     ap.add_argument("--key-file", default=os.path.join(REPO, "run", "api-key"))
-    ap.add_argument("--model", default="Upinel-AIOS-G")
+    ap.add_argument("--model", default="Upinel-AIOS-GGUF")
     ap.add_argument("--depth", type=int, default=8192)
     ap.add_argument("--max-tokens", type=int, default=32)
     ap.add_argument("--json")

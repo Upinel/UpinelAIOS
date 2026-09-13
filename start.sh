@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Start the UpinelAIOS-G endpoint.
+# Start the UpinelAIOS-GGUF endpoint.
 #
 #   ./start.sh                 start in the background (default)
 #   ./start.sh --foreground    run attached to this terminal (Ctrl-C to stop)
@@ -23,10 +23,10 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 
-step "UpinelAIOS-G"
+step "UpinelAIOS-GGUF"
 
 # ── preflight ────────────────────────────────────────────────────────────────
-is_apple_silicon || die "UpinelAIOS-G needs an Apple Silicon Mac."
+is_apple_silicon || die "UpinelAIOS-GGUF needs an Apple Silicon Mac."
 require_bin llama-server "Run ./install.sh first, or: brew install llama.cpp"
 require_bin python3 "python3 is required."
 
