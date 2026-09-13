@@ -48,10 +48,61 @@ Detection is on the tensor, not the filename, so any future head built the same
 way is caught too. `model_draft_gguf` and `draft_needs_patched_runtime` in
 `lib/common.sh` do the work.
 
+### What it actually buys, measured
+
+Built 2026-08 on the reference machine and measured before and after. This is
+the whole picture, including the part that is worse:
+
+**Qwen 27B (`qwen-27b`), same prompts, greedy-ish, median of five:**
+
+| runtime | draft | decode | acceptance |
+|---|---|---:|---:|
+| stock Homebrew | none | 7.6 t/s | — |
+| patched | none | 8.4 t/s | — |
+| **patched** | **FastMTP depth 1** | **15.4 t/s** | **77%** |
+| patched | FastMTP depth 3 | 10.6 t/s | 53% |
+| patched | FastMTP depth 5 | 8.1 t/s | 40% |
+
+**Depth 1, not 3.** Acceptance collapses with depth (77% → 53% → 40%), so
+drafting further costs more than it returns. That is the opposite of the
+Gemma MTP head, where depth 3 wins — different head, different profile, and
+worth re-measuring rather than assuming.
+
+So the honest number is **2.0x, 7.6 → 15.4 t/s**, not the ~3x the MTPLX side
+gets. Real, but short of what MTP achieves on Metal through MLX.
+
+**Gemma 26B-A4B (`26b-q4`), `llama-bench`, same machine:**
+
+| runtime | prefill | decode |
+|---|---:|---:|
+| stock Homebrew | 1924.7 t/s | **81.0 t/s** |
+| patched | 1888.1 t/s | 78.7 t/s |
+
+**The patched build makes Gemma slower** — about 2% on prefill, 3% on decode.
+Expected in hindsight: the patch only touches `src/models/qwen35.cpp`, so it
+gives Gemma nothing, while pinning the build to an older upstream commit
+(build 10454 against the current 10809) loses whatever landed since.
+
+So the two runtimes coexist rather than one replacing the other. `LLAMA_SERVER`
+in `env.conf` points at the patched binary when you want it; leaving it empty
+uses the Homebrew build, which is the right default for Gemma and for every
+Qwen model without a FastMTP head.
+
 ### Turning it on
 
-If you want the ~3x, build llama.cpp with the patch. The patch ships inside the
-model repo you already downloaded:
+
+If you want the speed, build llama.cpp with the patch. One command does the
+whole thing — clone, verify, patch, build, and record the result in `env.conf`:
+
+```bash
+./lib/build-fastmtp.sh
+```
+
+It refuses to build if the patch checksum does not match the provenance file
+alongside it, and it works on a CommandLineTools-only machine (no full Xcode):
+without the Metal compiler, shaders are compiled at runtime instead of embedded.
+
+The patch ships inside the model repo you already downloaded:
 
 ```
 models/HauhauCS--Qwen3.8-27B-Uncensored-HauhauCS-Aggressive-MTP-GGUF/
@@ -65,8 +116,7 @@ git clone https://github.com/ggml-org/llama.cpp
 cd llama.cpp
 git checkout 4df29be4f4c3673f428170fda944a5b19f743bb8     # the patch's base
 git apply /path/to/HauhauCS-FastMTP-llama.cpp.patch
-cmake -B build -DGGML_METAL=ON -DCMAKE_BUILD_TYPE=Release
-cmake --build build --config Release -j
+git apply --check   # ...before applying for real, so a mismatch is loud
 ```
 
 Verify the patch before trusting it — the repo signs it, and the signature is

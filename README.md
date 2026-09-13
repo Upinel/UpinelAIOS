@@ -451,11 +451,20 @@ There is no point being fast at something that will not answer.
 labelled 3.8 35B-A3B is a 3.6 distill carrying a single ROCm-format quant. It is
 named for what it actually is rather than mislabelled.
 
-`qwen-27b` MTP **does not work on a stock llama.cpp.** Its FastMTP head needs a
-patched runtime, and llama-server exits rather than falling back, so
-UpinelAIOS-GGUF detects the head and runs autoregressive to keep the server up.
-That costs roughly 3x on this model. See
-[docs/GGUF-RUNTIME.md](docs/GGUF-RUNTIME.md) for the patch and build steps.
+`qwen-27b` MTP needs a **patched llama.cpp**, and the build is one command:
+
+```bash
+./lib/build-fastmtp.sh      # clones, patches, builds, wires it into env.conf
+./start.sh --model qwen-27b # picks it up automatically for this model only
+```
+
+**7.6 t/s → ~14–15 t/s.** The patch only touches the Qwen35 architecture, and
+pinning to its base commit costs Gemma about 2–3%, so the patched build is used
+*only* for models whose draft head needs it — Gemma keeps the stock runtime.
+
+Without the patch the server detects the head, runs autoregressive, and says
+why, rather than exiting. Details and measurements:
+[docs/GGUF-RUNTIME.md](docs/GGUF-RUNTIME.md).
 
 ### Speed is not comparable across families
 
@@ -463,10 +472,12 @@ That costs roughly 3x on this model. See
 |---|---|---:|---:|
 | `26b-q4` | MoE, 8 of 128 experts | ~4B | **119 t/s** |
 | `qwen-9b` | dense | 9B | 41 t/s |
-| `qwen-27b` | dense | 27B | 7.6 t/s |
+| `qwen-27b` | dense | 27B | 14.2 t/s (patched, see below) |
 
-A dense 27B reads ~15 GB of weights per token; 7.6 t/s is what this memory
-bandwidth supports, not a bug. The Gemma 26B reaches 119 t/s precisely because
+A dense 27B reads ~15 GB of weights per token; that is what this memory
+bandwidth supports, not a bug. `qwen-27b` reaches 14.2 t/s only because
+its FastMTP draft head doubles the effective rate — without the patched
+build it runs at 7.6 t/s. The Gemma 26B reaches 119 t/s precisely because
 it is a mixture of experts with only ~4B active. **If Qwen speed is what you
 want, use [UpinelAIOS-MLX](https://github.com/Upinel/UpinelAIOS-MLX)** — MTPLX's
 MTP implementation works on Metal and llama.cpp's does not, which is the

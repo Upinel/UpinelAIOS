@@ -28,6 +28,9 @@ step "UpinelAIOS-GGUF"
 # ── preflight ────────────────────────────────────────────────────────────────
 is_apple_silicon || die "UpinelAIOS-GGUF needs an Apple Silicon Mac."
 require_bin llama-server "Run ./install.sh first, or: brew install llama.cpp"
+# LLAMA_SERVER may point at a patched build. It is only used for models whose
+# draft head actually requires the patch - see the selection below - so setting
+# it does not slow down anything else.
 require_bin python3 "python3 is required."
 
 if [[ -n "$MODEL_OVERRIDE" ]]; then
@@ -52,8 +55,23 @@ if (( ENABLE_VISION )); then
   [[ -n "$MMPROJ" ]] || warn "ENABLE_VISION=1 but no mmproj file found; serving text only."
 fi
 
+# Default to the stock build on PATH. This is swapped for a patched one only
+# when the selected model's draft head requires it.
+LLAMA_BIN="llama-server"
+
 DRAFT="$(model_draft_gguf "$MODEL_DIR" || true)"
 DEPTH="$(effective_depth)"
+
+# A trimmed-vocabulary draft head accepts far fewer tokens the deeper you
+# draft: measured 77% at depth 1 against 53% at depth 3, so depth 3 does less
+# work per round and comes out slower (10.6 t/s against 15.4). When the user
+# has left MTP_DEPTH on "auto" and no tuned value exists, use 1 for these
+# heads instead of the default 3. An explicit MTP_DEPTH always wins.
+if [[ "$MTP_DEPTH" == "auto" ]] && [[ -n "$DRAFT" ]] \
+   && [[ -z "$(tuned_depth)" ]] && draft_needs_patched_runtime "$DRAFT"; then
+  DEPTH=1
+  info "trimmed-vocab draft head: using depth 1 (it accepts 77% here against 53% at depth 3)."
+fi
 if (( DEPTH > 0 )) && [[ -z "$DRAFT" ]]; then
   warn "MTP_DEPTH=$DEPTH but this model has no draft file; running autoregressive."
   DEPTH=0
@@ -64,7 +82,15 @@ fi
 # falling back. Left alone, "a bit more speed" becomes "will not start".
 # Detect it and run autoregressive unless the user says they built the patch.
 if (( DEPTH > 0 )) && [[ -n "$DRAFT" ]] && draft_needs_patched_runtime "$DRAFT"; then
-  if (( ${DRAFT_PATCHED_RUNTIME:-0} )); then
+  # This head needs the patched runtime. Use it if we have one: either
+  # LLAMA_SERVER points somewhere, or the user says their PATH already has it.
+  # Choosing here rather than up front is the whole point - the patched build
+  # is a couple of percent slower, and Gemma must not pay that.
+  if [[ -n "${LLAMA_SERVER:-}" && -x "${LLAMA_SERVER:-}" ]]; then
+    LLAMA_BIN="$LLAMA_SERVER"
+    info "using the patched runtime for this draft: $LLAMA_SERVER"
+  elif (( ${DRAFT_PATCHED_RUNTIME:-0} )); then
+    LLAMA_BIN="llama-server"
     info "draft needs a patched llama.cpp; DRAFT_PATCHED_RUNTIME=1 so using it as-is."
   else
     warn "$(basename "$DRAFT") needs a patched llama.cpp (trimmed draft vocab)."
@@ -181,7 +207,7 @@ if (( TOOL_TEMPLATE )); then
 fi
 
 if (( PRINT_ONLY )); then
-  log "llama-server \\"
+  log "$LLAMA_BIN \\"
   printf '  %s \\\n' "${ARGS[@]}"
   exit 0
 fi
@@ -213,7 +239,7 @@ log ""
 # ── launch ───────────────────────────────────────────────────────────────────
 if (( FOREGROUND )); then
   info "Starting in the foreground. Ctrl-C to stop."
-  exec llama-server "${ARGS[@]}"
+  exec "$LLAMA_BIN" "${ARGS[@]}"
 fi
 
 # Record the effective config so ./restart.sh can report what changed.
@@ -227,7 +253,7 @@ fi
 
 # Detach fully: stdin from /dev/null so the child cannot hold the terminal
 # open, and all three fds redirected so a wrapper script returns immediately.
-nohup llama-server "${ARGS[@]}" </dev/null >>"$LOG_FILE" 2>&1 &
+nohup "$LLAMA_BIN" "${ARGS[@]}" </dev/null >>"$LOG_FILE" 2>&1 &
 SERVER_PID=$!
 disown "$SERVER_PID" 2>/dev/null || true
 echo "$SERVER_PID" > "$PID_FILE"
