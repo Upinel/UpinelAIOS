@@ -61,15 +61,27 @@ import urllib.request
 # right after the last <tool|> declaration and before <turn|>.
 ANCHOR = "        {%- set ns.prev_message_type = 'tool' -%}"
 
+# The pairing rule goes at the very TOP of the system turn, not beside the tool
+# declarations. Measured: with it after the tools, thinking=off still emitted
+# `justification` alone in 40% of calls, because a rule sitting behind a long
+# tool list is a long way from where the model starts writing. The same
+# sentence in the system prompt fore-fixed it completely. Position, not wording,
+# was the problem.
+EARLY_ANCHOR = "    {{- '<|turn>system\\n' -}}"
+
+PAIRING_NOTE = """
+    {%- if tools -%}
+        {{- '\\nField rule: some fields are only legal alongside another. Never supply `justification` unless you also supply `sandbox_permissions`, and never supply `sandbox_permissions` without `justification` - both or neither, every time. A call with only one of them is rejected. `justification` is not a general explanation field; use `description` for that.\\n' -}}
+    {%- endif -%}
+"""
+
 REMINDER = """
         {%- for tool in tools -%}
             {%- set _req = tool['function']['parameters']['required'] | default([]) -%}
             {%- if _req -%}
                 {{- '\\nAll of the following fields are MANDATORY in every ' + tool['function']['name'] + ' call and must never be omitted, even when a value seems obvious or optional: ' + (_req | join(', ')) + '.' -}}
             {%- endif -%}
-        {%- endfor -%}
-        {{- '\\nSome fields are only legal alongside another field. In particular: never supply `justification` unless you also supply `sandbox_permissions`, and never supply `sandbox_permissions` without `justification`. Sending either alone is rejected as a malformed call.' -}}
-"""
+        {%- endfor -%}"""
 
 
 # ---------------------------------------------------------------------------
@@ -133,12 +145,14 @@ def capture(url, out_path, api_key=None):
 
 
 def patch(template):
-    """Inject the required-fields reminder. Returns (new_template, n_tools_loops)."""
-    if ANCHOR not in template:
+    """Inject both reminders. Returns (new_template, n_anchors_found)."""
+    if ANCHOR not in template or EARLY_ANCHOR not in template:
         return None, 0
-    if template.count(ANCHOR) != 1:
+    if template.count(ANCHOR) != 1 or template.count(EARLY_ANCHOR) != 1:
         return None, -1
-    return template.replace(ANCHOR, REMINDER + ANCHOR), 1
+    out = template.replace(ANCHOR, REMINDER + ANCHOR, 1)
+    out = out.replace(EARLY_ANCHOR, EARLY_ANCHOR + PAIRING_NOTE, 1)
+    return out, 2
 
 
 def main():
