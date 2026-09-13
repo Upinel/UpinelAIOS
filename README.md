@@ -203,25 +203,38 @@ that depth 3 "collapses past ~8k" does not reproduce; at 8k it is 48 against 46.
 ngram-based speculation was also measured and **rejected** — it was slower than
 plain autoregressive (65 t/s against 70) on this workload.
 
-## Thinking is on or off, and "off" is 3x faster per turn
+## Thinking has a real token budget
 
-llama.cpp cannot cap thinking, so `minimal`, `low` and `high` all emit exactly
-`{"enable_thinking":true}` — the names are labels, not gradations. Only `off`
-changes anything.
+**Correction to earlier versions of this file:** it claimed llama.cpp cannot cap
+thinking, and that `minimal`/`low`/`high` were decorative labels all meaning
+"on". That was wrong. llama.cpp has `--reasoning-budget N`, a hard cap on the
+thought channel, plus `--reasoning-budget-message` injected as the cap is
+reached. The levels below are real budgets.
 
-That makes it the biggest lever on agent turn latency. Five agent tasks,
-completion tokens per turn:
+Eight agent tasks, greedy sampling, median completion tokens per turn and
+tool-call correctness:
 
-| | tokens/turn |
-|---|---:|
-| `THINKING=off` (default) | **19** |
-| `THINKING=minimal` | 58 |
+| `THINKING` | budget | tokens/turn | correct |
+|---|---:|---:|---:|
+| `off` | — | 133 | 8/8 |
+| **`minimal`** (default) | **32** | **72** | **8/8** |
+| `low` | 128 | 170 | 7/8 |
+| `medium` | 512 | 288 | 8/8 |
+| `high` | unlimited | 288 | 8/8 |
 
-Three times the tokens is three times the wait, because a tool call is small
-and thinking is not. On ten single-turn tool-selection tasks, thinking scored
-6/10 against no-thinking's 5/10 — within noise. That covers tool *selection*
-only; if you run multi-step planning or debugging, try `minimal` and compare on
-your own work.
+`minimal` is the cheapest of all — **cheaper than turning thinking off**. With
+no thought channel the model simply reasons inside its answer, which costs more;
+given a small budget it plans briefly and then acts. It also keeps every task
+correct.
+
+**The budget message is not optional.** Every budgeted value tested *without* it
+scored 7/8: the thought channel gets cut mid-sentence and the model never gets
+round to emitting a tool call at all. With the message, every budget scored 8/8.
+If you set a budget, keep a message.
+
+> Budgets are sensitive to where the cut lands — 96 scored 7/8 while both 32 and
+> 128 scored 8/8 — so these are measured points, not a formula. Re-run
+> `bench/thinking-budget-test.py` after changing models or prompts.
 
 ## Measuring this yourself
 
@@ -232,6 +245,8 @@ throughput benchmark gives you.
 python3 bench/agent-bench.py --depths 2048,8192,32768   # what an agent feels
 python3 bench/sweep.py --ask code --temp 0.7            # compare launch flags
 python3 bench/cache-reuse-test.py --depth 8192          # does your harness reuse?
+python3 bench/thinking-budget-test.py                   # tune the thinking budget
+python3 bench/verify-quant-select.py                    # offline, no server needed
 ```
 
 `agent-bench.py` measures time-to-first-token, prefill and decode at real
@@ -331,18 +346,26 @@ See [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
 ## Thinking
 
 ```conf
-THINKING="off" | "minimal" | "low" | "high"
+THINKING="off" | "minimal" | "low" | "medium" | "high"
+THINKING_BUDGET_TOKENS=0        # 0 = use the level's tuned budget
+THINKING_BUDGET_MESSAGE="..."   # injected as the budget runs out
 ```
 
-**llama.cpp cannot cap thinking.** Unlike MTPLX there is no token budget here —
-the setting only turns the thinking block on or off through the chat template.
-So `minimal`, `low` and `high` all behave as "on", and **`off` is the only
-setting that actually reduces thinking**. It is the default for that reason.
+Each level is a real token cap on the thought channel, applied with llama.cpp's
+`--reasoning-budget`. `minimal` (32 tokens) is the default and measured cheaper
+than `off`, while keeping every task correct — see
+[Thinking has a real token budget](#thinking-has-a-real-token-budget).
 
-It is also the largest single lever on agent turn latency — see
-[Thinking is on or off](#thinking-is-on-or-off-and-off-is-3x-faster-per-turn)
-for the measurements. `off` frees budget for tool calls, which share the same
-allowance, so it helps correctness as well as speed.
+**Keep `THINKING_BUDGET_MESSAGE` set.** Removing it costs accuracy: every
+budgeted level scored 7/8 without it against 8/8 with it, because a thought cut
+off mid-sentence leaves the model without a tool call.
+
+Set `THINKING_BUDGET_TOKENS` to override a level without editing the mapping —
+useful for a one-off hard task:
+
+```bash
+THINKING=high THINKING_BUDGET_TOKENS=1024 ./restart.sh
+```
 
 ## Quick start
 

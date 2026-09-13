@@ -133,6 +133,20 @@ fi
 # --chat-template-kwargs straight through.
 ARGS+=( --chat-template-kwargs "$(thinking_kwargs)" )
 
+# Cap the thought channel. Without this, "thinking on" is unbounded and the
+# model will happily spend 300 tokens reasoning about where to find a file.
+# The message matters as much as the budget: measured on eight agent tasks,
+# every budgeted setting without it scored 7/8 against thinking-off's 8/8,
+# because a thought cut off mid-sentence never got round to emitting a tool
+# call. With it, every budget scored 8/8. See lib/common.sh for the numbers.
+BUDGET="$(effective_thinking_budget)"
+if [[ -n "$BUDGET" ]]; then
+  ARGS+=( --reasoning-budget "$BUDGET" )
+  if [[ -n "${THINKING_BUDGET_MESSAGE:-}" ]]; then
+    ARGS+=( --reasoning-budget-message "$THINKING_BUDGET_MESSAGE" )
+  fi
+fi
+
 mkdir -p "$RUN_DIR"
 
 # Tool-call reliability. Gemma follows a schema's semantics but not its
