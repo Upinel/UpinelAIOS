@@ -38,6 +38,13 @@ Usage
     python3 lib/tools-template.py --in base.jinja --out run/tools-template.jinja
     python3 lib/tools-template.py --capture http://127.0.0.1:8000 run/base.jinja
 
+Note on Jinja support: llama.cpp uses minja, a small Jinja subset. Some
+filters that work in Python Jinja do not exist there - `default` on an object,
+for instance, raises "Unknown (built-in) filter 'default' for type Object" at
+render time, which makes every tool-using request fail with a 500. Keep the
+injected markup simple, and after changing it, make a real tool call before
+believing it works: the anchor check cannot catch a semantic error.
+
 Exits non-zero (without writing) if the anchor is missing, so start.sh can fall
 back to the model's stock template rather than shipping a broken one.
 """
@@ -61,7 +68,9 @@ REMINDER = """
                 {{- '\\nAll of the following fields are MANDATORY in every ' + tool['function']['name'] + ' call and must never be omitted, even when a value seems obvious or optional: ' + (_req | join(', ')) + '.' -}}
             {%- endif -%}
         {%- endfor -%}
+        {{- '\\nSome fields are only legal alongside another field. In particular: never supply `justification` unless you also supply `sandbox_permissions`, and never supply `sandbox_permissions` without `justification`. Sending either alone is rejected as a malformed call.' -}}
 """
+
 
 # ---------------------------------------------------------------------------
 # Minimal GGUF metadata reader -- enough to pull tokenizer.chat_template out.
