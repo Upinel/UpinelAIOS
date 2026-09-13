@@ -386,11 +386,31 @@ fine-tune.** There is no point being fast at something that will not answer.
 
 | alias | download | repo |
 |---|---:|---|
-| `26b-a4b` | 18 GB | `HauhauCS/Gemma4-26B-A4B-QAT-Uncensored-HauhauCS-Balanced-MTP` — **default**, MoE, fastest |
+| `26b-q4` | 15 GB | `OS-Software/gemma-4-26B-A4B-it-qat-q4_0-heretic-ja-GGUF` — **default**, Q4_0 QAT, fastest |
+| `26b-a4b` | 18 GB | `HauhauCS/Gemma4-26B-A4B-QAT-Uncensored-HauhauCS-Balanced-MTP` — same MoE in Q4_K_M, ~20% slower |
 | `12b` | 8 GB | `HauhauCS/Gemma4-12B-QAT-Uncensored-HauhauCS-Balanced` |
 | `31b-heretic` | 20 GB | `llmfan46/gemma-4-31B-it-uncensored-heretic-GGUF` — highest quality |
-| `e2b` | 4 GB | `HauhauCS/Gemma-4-E2B-Uncensored-HauhauCS-Aggressive` — **fastest**, fits 8 GB |
-| `e4b` | 7 GB | `HauhauCS/Gemma-4-E4B-Uncensored-HauhauCS-Aggressive` — middle, and loses on both counts |
+| `e2b` | 4 GB | `HauhauCS/Gemma-4-E2B-Uncensored-HauhauCS-Aggressive` — smallest, fits 8 GB |
+| `e4b` | 6 GB | `HauhauCS/Gemma-4-E4B-Uncensored-HauhauCS-Aggressive` — middle, and loses on both counts |
+
+**Why Q4_0 is the default.** Measured on this machine, MTP depth 3, identical
+prompts, median of five:
+
+| quant | size | prefill | decode | draft acceptance |
+|---|---:|---:|---:|---:|
+| Q4_K_M | 16.80 GB | 112 t/s | 97.2 t/s | 79% |
+| **Q4_0 QAT** | **14.25 GB** | **129 t/s** | **119.1 t/s** | **82%** |
+
+**+22% decode, +15% prefill, 15% smaller.** Two things make this safe rather
+than a quality gamble:
+
+- llama.cpp's Metal kernels run Q4_0 markedly faster than K-quants. That shows
+  up on any model — a 0.5B test model gains 25% on decode going Q4_K_M → Q4_0.
+- It is Google's **quantization-aware-trained** Q4_0 checkpoint, not a naive
+  post-hoc quantisation, so Q4_0 holds quality where it normally would not.
+
+The existing MTP drafter works with it unchanged, at slightly *higher*
+acceptance than on Q4_K_M.
 
 **Only one quant is downloaded.** GGUF repos often publish every quant of the
 same model, and the `31b-heretic` repo carries ten of them — 232 GB in total,

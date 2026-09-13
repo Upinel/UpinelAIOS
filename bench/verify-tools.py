@@ -82,6 +82,14 @@ if not sys.stdout.isatty():
 
 
 def post(url, payload, headers, timeout):
+    # Greedy by default. Without this the suite samples randomly, so a check
+    # that passes on one run can fail on the next with no change to the model
+    # or the server - which is indistinguishable from a real regression and
+    # wastes a lot of time chasing. Deterministic runs make a failure mean
+    # something. Pass --sampled to measure the real sampling behaviour instead.
+    if not globals().get("SAMPLED"):
+        payload = {**payload, "temperature": 0, "seed": 1,
+                   "top_k": 1, "top_p": 1}
     req = urllib.request.Request(
         url, data=json.dumps(payload).encode(),
         headers={"Content-Type": "application/json", **headers})
@@ -124,7 +132,12 @@ def main():
     ap.add_argument("--api-key")
     ap.add_argument("--api-key-file")
     ap.add_argument("--timeout", type=int, default=900)
+    ap.add_argument("--sampled", action="store_true",
+                    help="sample randomly instead of greedily. Reproduces\n"
+                         "the flakiness a real client sees, at the cost of\n"
+                         "non-deterministic results")
     args = ap.parse_args()
+    globals()["SAMPLED"] = args.sampled
 
     key = args.api_key
     if not key and args.api_key_file:

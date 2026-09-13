@@ -24,6 +24,7 @@ esac
 # publish every quant, and the others are skipped. See MODEL_QUANT in env.conf.
 size_hint() {
   case "$1" in
+    *q4_0-heretic*) echo "15 GB" ;;
     *26B-A4B*) echo "18 GB" ;;
     *12B*)     echo "8 GB"  ;;
     *31B*)     echo "20 GB" ;;

@@ -53,15 +53,30 @@ show_usage() {
 # built from Google's aligned models, so an uncensored Gemma 4 cannot run there
 # at all.
 #
-#   26b-a4b      MoE, ~4B active per token. The speed pick.
+#   26b-q4       MoE, Q4_0 QAT. FASTEST 26B - default. See below.
+#   26b-a4b      the same MoE in Q4_K_M. ~22% slower, kept for comparison.
 #   12b          dense 12B
 #   31b-heretic  dense 31B, abliterated. Highest quality.
 #   e4b          middle size - measured slower than both the 26B MoE and E2B
-#   e2b          smallest and FASTEST. Fits an 8 GB Mac.
-MODEL_ALIASES="26b-a4b 12b 31b-heretic e4b e2b"
+#   e2b          smallest and FITS an 8 GB Mac.
+#
+# Why 26b-q4 is the default: llama.cpp's Metal kernels run Q4_0 markedly
+# faster than K-quants, and Google's QAT release makes Q4_0 quality-safe
+# (quantization-aware training, so it holds near-bf16 quality where a naive
+# Q4_0 would not). Measured on this machine, MTP depth 3, identical prompts:
+#
+#     quant     size      prefill    decode    draft acceptance
+#     -------   -------   -------    ------    ----------------
+#     Q4_K_M    16.80 GB   112 t/s    97.2 t/s       79%
+#     Q4_0 QAT  14.25 GB   129 t/s   119.1 t/s       82%
+#
+# +22% decode, +15% prefill, 15% smaller. The existing MTP drafter works
+# with it unchanged; acceptance is slightly HIGHER than on Q4_K_M.
+MODEL_ALIASES="26b-q4 26b-a4b 12b 31b-heretic e4b e2b"
 
 model_repo_for() {
   case "$1" in
+    26b-q4)      echo "OS-Software/gemma-4-26B-A4B-it-qat-q4_0-heretic-ja-GGUF" ;;
     26b-a4b)     echo "HauhauCS/Gemma4-26B-A4B-QAT-Uncensored-HauhauCS-Balanced-MTP" ;;
     12b)         echo "HauhauCS/Gemma4-12B-QAT-Uncensored-HauhauCS-Balanced" ;;
     31b-heretic) echo "llmfan46/gemma-4-31B-it-uncensored-heretic-GGUF" ;;
@@ -75,27 +90,21 @@ model_repo_for() {
 
 model_is_known_alias() {
   case "$1" in
-    26b-a4b|12b|31b-heretic|e4b|e2b) return 0 ;;
+    26b-q4|26b-a4b|12b|31b-heretic|e4b|e2b) return 0 ;;
     *) return 1 ;;
   esac
 }
-
-# Preferred quant, best size/quality first. The downloader picks the first one
-# the repo actually publishes rather than just taking the largest file - the
-# 31B publishes a 61 GB BF16 and the E4B an 8 GB Q8, neither of which is what
-# you want by default.
-QUANT_PREFERENCE="Q4_K_M Q4_K_S Q4_K_P IQ4_XS Q5_K_M Q5_K_S Q6_K Q8_0 Q8_K_P Q3_K_M"
 
 # ── config ───────────────────────────────────────────────────────────────────
 load_config() {
   [[ -f "$ENV_FILE" ]] || die "env.conf not found at $ENV_FILE"
 
-  MODEL="26b-a4b"
+  MODEL="26b-q4"
   MODELS_DIR="$REPO_DIR/models"
   CONTEXT_WINDOW=131072
   MAX_RESPONSE_TOKENS=32768
   KV_QUANT="q8_0"
-  THINKING="minimal"
+  THINKING="off"
   THINKING_BUDGET_TOKENS=0
   MTP_DEPTH="auto"
   PREFILL_CHUNK_TOKENS=512
@@ -159,14 +168,35 @@ model_main_gguf() {
     | sort -rn | head -1 | cut -f2
 }
 
+# Match "mmproj" anywhere in the name, not only at the start. Plenty of repos
+# embed it mid-filename - gemma-4-26B-A4B-...-mmproj-BF16.gguf - and the old
+# anchored mmproj*.gguf pattern silently found nothing for them.
 model_mmproj_gguf() {
   local dir="$1"
-  find -L "$dir" -maxdepth 1 -name 'mmproj*.gguf' 2>/dev/null | head -1
+  find -L "$dir" -maxdepth 1 -iname '*.gguf' 2>/dev/null \
+    | grep -iE 'mmproj' | head -1
 }
 
+# The MTP draft head, matched the same way. DRAFT_FILE in env.conf overrides.
+#
+# Fallback: a repo may ship weights without the drafter. The Q4_0 QAT 26B does
+# exactly that, while the MTP head is a separate artifact that works across
+# quants of the same architecture - measured 82% acceptance against Q4_0,
+# slightly better than the 79% it gives against Q4_K_M. So when this model's
+# directory has no drafter, look for one elsewhere under models/ rather than
+# quietly running autoregressive and losing about a fifth of decode speed.
 model_draft_gguf() {
-  local dir="$1"
-  find -L "$dir" -maxdepth 1 -name 'mtp-*.gguf' 2>/dev/null | head -1
+  local dir="$1" hit=""
+  if [[ -n "${DRAFT_FILE:-}" && -f "${DRAFT_FILE:-}" ]]; then
+    echo "$DRAFT_FILE"
+    return
+  fi
+  hit="$(find -L "$dir" -maxdepth 1 -iname '*.gguf' 2>/dev/null \
+          | grep -iE '(^|/)(mtp|draft)[-_]' | head -1)"
+  if [[ -z "$hit" ]]; then
+    hit="$(find -L "$MODELS_DIR" -maxdepth 2 -iname 'mtp-*.gguf' 2>/dev/null | head -1)"
+  fi
+  [[ -n "$hit" ]] && echo "$hit"
 }
 
 model_present() {
