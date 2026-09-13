@@ -1,4 +1,15 @@
 #!/usr/bin/env bash
+# ─────────────────────────────────────────────────────────────────────────────
+#  Nova Upinel Chow, MSc, LLM, BBA, MENSA  ·  upinel@me.com  ·  upinel.com
+#  Copyright (c) 2026 Nova Upinel Chow. All rights reserved.
+#
+#  Upinel Personal Free License: free for personal use, commercial use by
+#  written permission, and anything built from this must credit the author.
+#  See LICENSE.
+#
+#  "Make it work, make it right, make it fast - then measure it, because
+#   the third one is only a claim until the numbers agree."
+# ─────────────────────────────────────────────────────────────────────────────
 # Build the patched llama.cpp that the Qwen 27B FastMTP draft head needs.
 #
 #   ./lib/build-fastmtp.sh                 build and wire it up
@@ -35,7 +46,9 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --dir)   SRC_DIR="${2:-}"; shift 2 ;;
     --check) BUILD_DIR="__check__"; shift ;;
-    -h|--help) sed -n '2,22p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    # show_usage() reads the leading comment block rather than a line range: a
+    # line range silently truncates the help the moment a comment is added.
+    -h|--help) show_usage "${BASH_SOURCE[0]}"; exit 0 ;;
     *) die "Unknown argument: $1  (try --help)" ;;
   esac
 done
