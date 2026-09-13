@@ -385,12 +385,41 @@ git clone https://github.com/upinel/UpinelAIOS-GGUF && cd UpinelAIOS-GGUF
 
 ./install.sh          # scans your Mac, suggests settings, installs everything
 ./start.sh            # serves http://<your-lan-ip>:8000/v1
+./chat.sh             # talk to it right here in the terminal
 ./status.sh           # live dashboard
 ./restart.sh          # apply an env.conf change
 ./stop.sh
 ```
 
 Point any OpenAI-compatible client at the URL `./status.sh` prints.
+
+### Chatting from the terminal
+
+`./chat.sh` is a streaming chat client for the server you already have running.
+Nothing new is served and nothing is reconfigured — it just connects back to it.
+
+```
+you ▸ Explain what a mixture-of-experts model is, briefly.
+ai  ▸ A mixture-of-experts model splits its feed-forward layers into many
+      expert subnetworks and routes each token to only a few of them...
+        119.1 t/s   prefill 129 t/s   1.4s
+```
+
+Replies stream as they are generated, thinking is shown dimmed behind a
+`(thinking)` marker, and every turn ends with its own line of telemetry so you
+can see what the server is actually doing.
+
+```bash
+./chat.sh                      # start chatting
+./chat.sh --thinking on        # think before answering
+./chat.sh --system "You are a terse assistant."
+./chat.sh --temp 0.2           # tighter sampling
+./chat.sh --no-stream          # wait for whole replies
+```
+
+In-session commands: `/help`, `/reset`, `/system <text>`, `/thinking on|off`,
+`/temp <0..2>`, `/stats`, `/save <file>`, `/clear`, `/exit`. `Ctrl-C` stops a
+reply without quitting; `Ctrl-D` leaves.
 
 ## Models — uncensored only
 
