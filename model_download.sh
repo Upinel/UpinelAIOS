@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Download uncensored Gemma 4 models and switch between them.
+# Download uncensored Gemma 4 and Qwen models and switch between them.
 #
 #   ./model_download.sh                 list known models and what is on disk
 #   ./model_download.sh 12b             download one
@@ -25,6 +25,9 @@ esac
 size_hint() {
   case "$1" in
     *q4_0-heretic*) echo "15 GB" ;;
+    *Qwen3.8-27B*)  echo "19 GB" ;;
+    *Qwen3.8-9B*)   echo "6 GB"  ;;
+    *Qwen3.6-35B*)  echo "22 GB" ;;
     *26B-A4B*) echo "18 GB" ;;
     *12B*)     echo "8 GB"  ;;
     *31B*)     echo "20 GB" ;;
@@ -38,7 +41,7 @@ model_on_disk() { model_present "$MODELS_DIR/${1//\//--}"; }
 disk_usage()    { du -shL "$MODELS_DIR/${1//\//--}" 2>/dev/null | awk '{print $1}'; }
 
 list_models() {
-  step "Known uncensored Gemma 4 models"
+  step "Known uncensored models"
   printf '  %-12s %-8s %-10s %s\n' "ALIAS" "SIZE" "ON DISK" "REPO"
   printf '  %-12s %-8s %-10s %s\n' "------------" "--------" "----------" "------------------------------------------"
   for alias in $MODEL_ALIASES; do

@@ -151,7 +151,7 @@ load_config() {
   export MODEL MODEL_REPO MODEL_DIR MODELS_DIR CONTEXT_WINDOW MAX_RESPONSE_TOKENS
   export MODEL_QUANT
   export KV_QUANT THINKING THINKING_BUDGET_TOKENS THINKING_BUDGET_MESSAGE
-  export MTP_DEPTH HOST PORT API_KEY_FILE
+  export MTP_DEPTH HOST PORT API_KEY_FILE DRAFT_PATCHED_RUNTIME
   export SERVED_MODEL_NAME FAN_MODE LOG_FILE ENABLE_VISION PARALLEL_SLOTS
   export MEMORY_LIMIT_GB WIRED_LIMIT_GB USE_MLOCK MAX_CONCURRENT
   export PREFILL_CHUNK_TOKENS BATCH_SIZE UBATCH_SIZE
@@ -251,6 +251,68 @@ model_present() {
   local dir="$1"
   [[ -n "$(model_main_gguf "$dir" 2>/dev/null || true)" ]]
 }
+
+# Does this draft head need a patched llama.cpp?
+#
+# HauhauCS's FastMTP heads trim the drafter's output vocabulary and carry a
+# `d2t` remap tensor to compensate. Stock llama.cpp does not know that tensor,
+# so it compares the trimmed output against the full vocab and refuses:
+#
+#   tensor 'output.weight' has wrong shape; expected 5120, 248320, got 5120, 32768
+#
+# Worse, llama-server treats a failed draft as fatal and exits, so attaching
+# one of these turns "a bit more speed" into "the server will not start".
+#
+# Detect the d2t tensor itself rather than pattern-matching the filename, so
+# this keeps working for any future head built the same way. Returns 0 when
+# the draft needs a patched runtime.
+draft_needs_patched_runtime() {
+  local f="${1:-}"
+  [[ -n "$f" && -f "$f" ]] || return 1
+  python3 - "$f" <<'PY' 2>/dev/null
+import struct, sys
+
+# Walk the GGUF tensor directory and look for a d2t remap tensor.
+with open(sys.argv[1], 'rb') as fh:
+    if fh.read(4) != b'GGUF':
+        raise SystemExit(1)
+    struct.unpack('<I', fh.read(4))            # version
+    n_tensors, = struct.unpack('<Q', fh.read(8))
+    n_kv, = struct.unpack('<Q', fh.read(8))
+
+    SIZES = {0:1,1:1,2:2,3:2,4:4,5:4,6:4,7:1,10:8,11:8,12:8}
+
+    def rd_str():
+        (n,) = struct.unpack('<Q', fh.read(8))
+        return fh.read(n).decode('utf-8', 'replace')
+
+    def skip_val(t):
+        if t == 8:
+            rd_str()
+        elif t == 9:
+            et, = struct.unpack('<I', fh.read(4))
+            (cnt,) = struct.unpack('<Q', fh.read(8))
+            for _ in range(cnt):
+                skip_val(et)
+        else:
+            fh.read(SIZES[t])
+
+    for _ in range(n_kv):
+        rd_str()
+        (vt,) = struct.unpack('<I', fh.read(4))
+        skip_val(vt)
+
+    for _ in range(n_tensors):
+        name = rd_str()
+        if name == 'd2t' or name.endswith('.d2t'):
+            raise SystemExit(0)
+        (nd,) = struct.unpack('<I', fh.read(4))
+        fh.read(8 * nd)                        # dims
+        fh.read(4 + 8)                         # type, offset
+raise SystemExit(1)
+PY
+}
+
 
 model_weights_gb() {
   local dir="${1:-$MODEL_DIR}" main

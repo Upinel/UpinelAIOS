@@ -59,6 +59,23 @@ if (( DEPTH > 0 )) && [[ -z "$DRAFT" ]]; then
   DEPTH=0
 fi
 
+# A draft built against a patched llama.cpp will not load on a stock one, and
+# llama-server treats that as fatal - the whole server exits rather than
+# falling back. Left alone, "a bit more speed" becomes "will not start".
+# Detect it and run autoregressive unless the user says they built the patch.
+if (( DEPTH > 0 )) && [[ -n "$DRAFT" ]] && draft_needs_patched_runtime "$DRAFT"; then
+  if (( ${DRAFT_PATCHED_RUNTIME:-0} )); then
+    info "draft needs a patched llama.cpp; DRAFT_PATCHED_RUNTIME=1 so using it as-is."
+  else
+    warn "$(basename "$DRAFT") needs a patched llama.cpp (trimmed draft vocab)."
+    warn "Running autoregressive to keep the server up."
+    warn "Build llama.cpp with the HauhauCS FastMTP patch and set"
+    warn "DRAFT_PATCHED_RUNTIME=1 in env.conf to use it. See docs/GGUF-RUNTIME.md."
+    DEPTH=0
+    DRAFT=""
+  fi
+fi
+
 # ── memory sanity ────────────────────────────────────────────────────────────
 RAM_GB="$(total_ram_gb)"
 WEIGHTS_GB=$(( $(stat -f%z "$MAIN_GGUF") / 1000000000 ))

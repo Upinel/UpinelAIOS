@@ -1,0 +1,112 @@
+# The GGUF runtime, and the FastMTP patch
+
+UpinelAIOS-GGUF runs everything through **llama.cpp**. That is a deliberate
+constraint rather than a limitation we have not got around to: llama.cpp is the
+only runtime that can serve an uncensored Gemma 4 at all, and it serves every
+other GGUF equally well, which is why the Qwen family lives here too.
+
+One thing needs saying plainly, because it costs a factor of three on the 27B.
+
+## The Qwen 27B MTP head needs a patched llama.cpp
+
+HauhauCS publishes `Qwen3.8-27B-Uncensored-HauhauCS-Aggressive-FastMTP-32K.gguf`
+as the MTP draft head for the 27B. It is a genuine speed win — the same model
+through MTPLX in the sister project runs 2.6–3.4x faster with MTP than without.
+
+It does **not** work on a stock llama.cpp. Its provenance file says so:
+
+```
+runtime_base:  ggerganov/llama.cpp@4df29be4f4c3673f428170fda944a5b19f743bb8
+runtime_patch: HauhauCS-FastMTP-llama.cpp.patch
+```
+
+That 53-line patch adds a `d2t` tensor: the drafter's output vocabulary is
+**trimmed** from 248,320 tokens to 32,768, and `d2t` remaps between them. Stock
+llama.cpp does not know the tensor, compares the trimmed output against the full
+vocabulary, and refuses:
+
+```
+error loading model: check_tensor_dims: tensor 'output.weight' has wrong shape;
+  expected 5120, 248320, got 5120, 32768
+```
+
+**And llama-server treats a failed draft as fatal.** It does not fall back — it
+exits. So attaching that head on a stock build does not cost you speed, it
+stops the server booting.
+
+### What UpinelAIOS-GGUF does about it
+
+It detects the `d2t` tensor in the draft's GGUF and, unless you tell it
+otherwise, **skips the draft and runs autoregressive**, printing why:
+
+```
+warn Qwen3.8-27B-...-FastMTP-32K.gguf needs a patched llama.cpp (trimmed draft vocab).
+warn Running autoregressive to keep the server up.
+```
+
+Detection is on the tensor, not the filename, so any future head built the same
+way is caught too. `model_draft_gguf` and `draft_needs_patched_runtime` in
+`lib/common.sh` do the work.
+
+### Turning it on
+
+If you want the ~3x, build llama.cpp with the patch. The patch ships inside the
+model repo you already downloaded:
+
+```
+models/HauhauCS--Qwen3.8-27B-Uncensored-HauhauCS-Aggressive-MTP-GGUF/
+  HauhauCS-FastMTP-llama.cpp.patch
+  FastMTP-PROVENANCE.json
+  HauhauCS-FastMTP-Ed25519-PUBLIC.pem
+```
+
+```bash
+git clone https://github.com/ggml-org/llama.cpp
+cd llama.cpp
+git checkout 4df29be4f4c3673f428170fda944a5b19f743bb8     # the patch's base
+git apply /path/to/HauhauCS-FastMTP-llama.cpp.patch
+cmake -B build -DGGML_METAL=ON -DCMAKE_BUILD_TYPE=Release
+cmake --build build --config Release -j
+```
+
+Verify the patch before trusting it — the repo signs it, and the signature is
+worth checking rather than taking on faith:
+
+```bash
+shasum -a 256 HauhauCS-FastMTP-llama.cpp.patch
+# compare against runtime_patch_sha256 in FastMTP-PROVENANCE.json
+```
+
+Then point the server at your build and tell it the draft is usable:
+
+```bash
+LLAMA_SERVER=/path/to/llama.cpp/build/bin/llama-server   # or put it on PATH
+DRAFT_PATCHED_RUNTIME=1                                   # in env.conf
+./restart.sh
+```
+
+`DRAFT_PATCHED_RUNTIME=1` only says "this head is loadable" — it does not build
+anything. With it set on a stock runtime, the server will exit, exactly as it
+does today when the head is attached by hand.
+
+## Why this matters less than it sounds
+
+The unpatched 27B runs at **7.6 t/s** here. That is not a bug: a dense 27B reads
+about 15 GB of active weights per token, and ~7.6 t/s is what this memory
+bandwidth supports. The Qwen 27B is a *dense* model — every parameter is active
+on every token — unlike the Gemma 26B A4B, which is a mixture of experts with
+only ~4B active and reaches 119 t/s for exactly that reason.
+
+So the two families are not comparable on speed and should not be sold as if
+they are:
+
+| model | shape | active per token | decode here |
+|---|---|---:|---:|
+| `26b-q4` (Gemma 4) | MoE, 8 of 128 experts | ~4B | 119 t/s |
+| `qwen-9b` | dense | 9B | 41 t/s |
+| `qwen-27b` | dense | 27B | 7.6 t/s |
+
+If you want Qwen 27B speed, the honest answer is the **MLX project**: MTPLX's
+MTP implementation works on Metal and llama.cpp's does not, which is the single
+clearest reason the two projects exist side by side. See
+[UpinelAIOS-MLX](https://github.com/Upinel/UpinelAIOS-MLX).

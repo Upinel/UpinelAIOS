@@ -394,8 +394,10 @@ Point any OpenAI-compatible client at the URL `./status.sh` prints.
 
 ## Models — uncensored only
 
-**Every model UpinelAIOS-GGUF ships or suggests is an uncensored Gemma 4
-fine-tune.** There is no point being fast at something that will not answer.
+**Every model UpinelAIOS-GGUF ships or suggests is an uncensored fine-tune.**
+There is no point being fast at something that will not answer.
+
+### Gemma 4
 
 | alias | download | repo |
 |---|---:|---|
@@ -405,6 +407,41 @@ fine-tune.** There is no point being fast at something that will not answer.
 | `31b-heretic` | 20 GB | `llmfan46/gemma-4-31B-it-uncensored-heretic-GGUF` — highest quality |
 | `e2b` | 4 GB | `HauhauCS/Gemma-4-E2B-Uncensored-HauhauCS-Aggressive` — smallest, fits 8 GB |
 | `e4b` | 6 GB | `HauhauCS/Gemma-4-E4B-Uncensored-HauhauCS-Aggressive` — middle, and loses on both counts |
+
+### Qwen
+
+| alias | download | repo |
+|---|---:|---|
+| `qwen-27b` | 19 GB | `HauhauCS/Qwen3.8-27B-Uncensored-HauhauCS-Aggressive-MTP-GGUF` |
+| `qwen-9b` | 6 GB | `mradermacher/Qwen3.8-9B-heretic-uncensored-i1-GGUF` |
+| `qwen-35b` | 22 GB | `HauhauCS/Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive` |
+
+**Two things to know before you pick Qwen here.**
+
+`qwen-35b` is **3.6, not 3.8.** Qwen never released a 3.8 35B-A3B; the only repo
+labelled 3.8 35B-A3B is a 3.6 distill carrying a single ROCm-format quant. It is
+named for what it actually is rather than mislabelled.
+
+`qwen-27b` MTP **does not work on a stock llama.cpp.** Its FastMTP head needs a
+patched runtime, and llama-server exits rather than falling back, so
+UpinelAIOS-GGUF detects the head and runs autoregressive to keep the server up.
+That costs roughly 3x on this model. See
+[docs/GGUF-RUNTIME.md](docs/GGUF-RUNTIME.md) for the patch and build steps.
+
+### Speed is not comparable across families
+
+| model | shape | active per token | decode here |
+|---|---|---:|---:|
+| `26b-q4` | MoE, 8 of 128 experts | ~4B | **119 t/s** |
+| `qwen-9b` | dense | 9B | 41 t/s |
+| `qwen-27b` | dense | 27B | 7.6 t/s |
+
+A dense 27B reads ~15 GB of weights per token; 7.6 t/s is what this memory
+bandwidth supports, not a bug. The Gemma 26B reaches 119 t/s precisely because
+it is a mixture of experts with only ~4B active. **If Qwen speed is what you
+want, use [UpinelAIOS-MLX](https://github.com/Upinel/UpinelAIOS-MLX)** — MTPLX's
+MTP implementation works on Metal and llama.cpp's does not, which is the
+clearest reason the two projects exist side by side.
 
 **Why Q4_0 is the default.** Measured on this machine, MTP depth 3, identical
 prompts, median of five:
