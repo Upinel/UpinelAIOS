@@ -150,8 +150,10 @@ Check, in order:
    88.7 t/s off against 67.8 t/s on.
 2. **Is `MTP_DEPTH` right?** Depth 1 is the measured optimum. Depth 3 looks
    faster on very short prompts and collapses past 8k context.
-3. **How long is your context?** 88 t/s at 512 tokens, 66 at 8k, 39–50 at 32k.
-   This is expected, not a misconfiguration.
+3. **How long is your context?** Decode is broadly flat once context is past a
+   few thousand tokens, but prefill is not: 1,058 t/s at 2k against 461 t/s at
+   32k, which is what makes the first turn of a long conversation slow. This is
+   expected, not a misconfiguration.
 4. **Is macOS under memory pressure?** `vm_stat | grep -i wired` and
    `sysctl vm.swapusage`. If `free` is under ~3 GB you are paging.
 5. **Are you re-prefilling every turn?** llama.cpp caches prefixes, but only if

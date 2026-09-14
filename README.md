@@ -12,10 +12,12 @@
 -->
 <h1 align="center">UpinelAIOS-GGUF</h1>
 
-<p align="center"><b>Upinel's One-Click AI Agent Server OS for Mac (GGUF)</b><br>
-<b>Focus on Extreme performance optimisation for AI Agent workflow</b><br>
-A local, uncensored, OpenAI-compatible agent endpoint on your own Apple Silicon Mac.<br>
-One command to install. One command to serve. Your data never leaves the LAN.</p>
+<p align="center">
+  <b>Up to 106 t/s decode — uncensored, 100% local, on your own Mac.</b><br>
+  One-click AI agent server OS for Apple Silicon · GGUF / llama.cpp<br>
+  <sub>Extreme performance optimisation for AI agent workflows.</sub><br>
+  <sub>One command to install. One command to serve. Your data never leaves the LAN.</sub>
+</p>
 
 <p align="center">
   <sub>Built by <b>Nova Upinel Chow</b>, MSc, LLM, BBA, MENSA &nbsp;·&nbsp;
@@ -66,9 +68,8 @@ Built and measured on an **M5 Pro / 20-core GPU / 64 GB**, serving
 a companion MTP draft model:
 
 ```
-119 t/s decode at 2k context    (uncensored MoE, ~4B active per token)
- 82 t/s decode at 16k context
-129 t/s prefill, 0.25 s warm TTFT
+106 t/s decode, 1.1 s TTFT     (uncensored MoE, ~4B active per token)
+ 99 t/s on the small E2B, if you want it snappier
 256K context supported, 131K default
 OpenAI-compatible API on your LAN, plus vision when you want it
 ```
@@ -83,22 +84,23 @@ Clone it, run `./install.sh`, run `./start.sh`. Nothing else.
 - [Quick start](#quick-start)
   - [Chatting from the terminal](#chatting-from-the-terminal)
 - [Configure it](#configure-it)
-  - [Models — uncensored only](#models-uncensored-only)
+  - [Models: uncensored only](#models-uncensored-only)
     - [Gemma 4](#gemma-4)
     - [Qwen](#qwen)
-    - [Speed is not comparable across families](#speed-is-not-comparable-across-families)
+    - [Why Q4_0 is the default quant](#why-q4_0-is-the-default-quant)
+    - [Dense and MoE models are not comparable](#dense-and-moe-models-are-not-comparable)
   - [Thinking](#thinking)
   - [Vision costs 24%](#vision-costs-24)
 - [Going deeper](#going-deeper)
   - [Why this is a separate project from UpinelAIOS-MLX](#why-this-is-a-separate-project-from-upinelaios-mlx)
-  - [Speculative depth — the one speed knob that matters](#speculative-depth-the-one-speed-knob-that-matters)
+  - [Speculative depth: the one speed knob that matters](#speculative-depth-the-one-speed-knob-that-matters)
   - [Thinking has a real token budget](#thinking-has-a-real-token-budget)
   - [Keep the prompt prefix stable](#keep-the-prompt-prefix-stable)
   - [Agents that write files](#agents-that-write-files)
 - [Benchmarks](#benchmarks)
   - [Measured throughput](#measured-throughput)
-    - [On an M1 MacBook Air](#on-an-m1-macbook-air)
-    - [How speed scales with context](#how-speed-scales-with-context)
+    - [How prefill behaves as context grows](#how-prefill-behaves-as-context-grows)
+    - [On a smaller Mac](#on-a-smaller-mac)
   - [Measuring this yourself](#measuring-this-yourself)
     - [Tested and rejected](#tested-and-rejected)
 - [Running it day to day](#running-it-day-to-day)
@@ -126,9 +128,9 @@ option actually needs, measured as resident set size:
 | `31b-heretic` | 17.8 GB | ~22 GB | 32 GB Mac |
 
 On an 8 GB Mac set `MODEL="e2b"`, `CONTEXT_WINDOW=8192` and
-`MEMORY_LIMIT_GB=6`. macOS itself wants 3–4 GB, so leave it that room. On
-16 GB, `e2b` and `12b` are both comfortable and `26b-a4b` is possible at a
-reduced context.
+`MEMORY_LIMIT_GB=6`. macOS itself wants 3–4 GB, so leave it that room. On a
+16 GB Mac, `e2b` is comfortable, `12b` is the largest model that fits, and the
+default `26b-q4` does not — it wants ~19 GB with its context.
 
 Disk: 4–20 GB per model, depending which you pick.
 
@@ -183,7 +185,7 @@ Nothing new is served and nothing is reconfigured — it just connects back to i
 you ▸ Explain what a mixture-of-experts model is, briefly.
 ai  ▸ A mixture-of-experts model splits its feed-forward layers into many
       expert subnetworks and routes each token to only a few of them...
-        119.1 t/s   prefill 129 t/s   1.4s
+        106.4 t/s   prefill 98 t/s   1.1s
 ```
 
 Replies stream as they are generated, thinking is shown dimmed behind a
@@ -219,7 +221,7 @@ ai  ▸ ...
 
 ## Configure it
 
-### Models — uncensored only
+### Models: uncensored only
 
 **Every model UpinelAIOS-GGUF ships or suggests is an uncensored fine-tune.**
 There is no point being fast at something that will not answer.
@@ -250,12 +252,12 @@ asked.
 
 | alias | download | repo |
 |---|---:|---|
-| `26b-q4` | 15 GB | `OS-Software/gemma-4-26B-A4B-it-qat-q4_0-heretic-ja-GGUF` — **default**, Q4_0 QAT, fastest |
-| `26b-a4b` | 18 GB | `HauhauCS/Gemma4-26B-A4B-QAT-Uncensored-HauhauCS-Balanced-MTP` — same MoE in Q4_K_M, ~20% slower |
-| `12b` | 8 GB | `HauhauCS/Gemma4-12B-QAT-Uncensored-HauhauCS-Balanced` |
-| `31b-heretic` | 20 GB | `llmfan46/gemma-4-31B-it-uncensored-heretic-GGUF` — highest quality |
-| `e2b` | 4 GB | `HauhauCS/Gemma-4-E2B-Uncensored-HauhauCS-Aggressive` — smallest, fits 8 GB |
-| `e4b` | 6 GB | `HauhauCS/Gemma-4-E4B-Uncensored-HauhauCS-Aggressive` — middle, and loses on both counts |
+| **`26b-q4`** | 15 GB | `OS-Software/gemma-4-26B-A4B-it-qat-q4_0-heretic-ja-GGUF` — **default**, 106.4 t/s, Q4_0 QAT |
+| `26b-a4b` | 18 GB | `HauhauCS/Gemma4-26B-A4B-QAT-Uncensored-HauhauCS-Balanced-MTP` — same MoE in Q4_K_M, 72.5 t/s. Skip it. |
+| `e2b` | 4 GB | `HauhauCS/Gemma-4-E2B-Uncensored-HauhauCS-Aggressive` — 99.9 t/s. Smallest, fits 8 GB. |
+| `e4b` | 6 GB | `HauhauCS/Gemma-4-E4B-Uncensored-HauhauCS-Aggressive` — 63.9 t/s. Only if `26b-q4` will not fit. |
+| `12b` | 8 GB | `HauhauCS/Gemma4-12B-QAT-Uncensored-HauhauCS-Balanced` — 54.5 t/s. Largest that fits a 16 GB Mac. |
+| `31b-heretic` | 20 GB | `llmfan46/gemma-4-31B-it-uncensored-heretic-GGUF` — highest quality dense model |
 
 #### Qwen
 
@@ -286,41 +288,38 @@ Without the patch the server detects the head, runs autoregressive, and says
 why, rather than exiting. Details and measurements:
 [docs/GGUF-RUNTIME.md](docs/GGUF-RUNTIME.md).
 
-#### Speed is not comparable across families
+#### Why Q4_0 is the default quant
 
-| model | shape | active per token | decode here |
-|---|---|---:|---:|
-| `26b-q4` | MoE, 8 of 128 experts | ~4B | **119 t/s** |
-| `qwen-9b` | dense | 9B | 41 t/s |
-| `qwen-27b` | dense | 27B | 14.2 t/s (patched, see below) |
+The two 26B entries in the throughput table below are the same model in
+different quants, and that comparison is the whole reason the default is what
+it is:
 
-A dense 27B reads ~15 GB of weights per token; that is what this memory
-bandwidth supports, not a bug. `qwen-27b` reaches 14.2 t/s only because
-its FastMTP draft head doubles the effective rate — without the patched
-build it runs at 7.6 t/s. The Gemma 26B reaches 119 t/s precisely because
-it is a mixture of experts with only ~4B active. **If Qwen speed is what you
-want, use [UpinelAIOS-MLX](https://github.com/Upinel/UpinelAIOS-MLX)** — MTPLX's
-MTP implementation works on Metal and llama.cpp's does not, which is the
-clearest reason the two projects exist side by side.
+| quant | size | decode |
+|---|---:|---:|
+| Q4_K_M &nbsp;(`26b-a4b`) | 16.8 GB | 72.5 t/s |
+| **Q4_0 QAT &nbsp;(`26b-q4`)** | **14.25 GB** | **106.4 t/s** |
 
-**Why Q4_0 is the default.** Measured on this machine, MTP depth 3, identical
-prompts, median of five:
-
-| quant | size | prefill | decode | draft acceptance |
-|---|---:|---:|---:|---:|
-| Q4_K_M | 16.80 GB | 112 t/s | 97.2 t/s | 79% |
-| **Q4_0 QAT** | **14.25 GB** | **129 t/s** | **119.1 t/s** | **82%** |
-
-**+22% decode, +15% prefill, 15% smaller.** Two things make this safe rather
-than a quality gamble:
+**~47% faster decode and 15% smaller, from the same weights.** Two things make
+that safe rather than a quality gamble:
 
 - llama.cpp's Metal kernels run Q4_0 markedly faster than K-quants. That shows
   up on any model — a 0.5B test model gains 25% on decode going Q4_K_M → Q4_0.
 - It is Google's **quantization-aware-trained** Q4_0 checkpoint, not a naive
   post-hoc quantisation, so Q4_0 holds quality where it normally would not.
 
-The existing MTP drafter works with it unchanged, at slightly *higher*
-acceptance than on Q4_K_M.
+The existing MTP drafter works with it unchanged.
+
+#### Dense and MoE models are not comparable
+
+A dense 27B reads ~15 GB of weights for every token; that is what this memory
+bandwidth supports, not a bug — which is why `qwen-27b` sits at 13.5 t/s while
+the 26B Gemma, a mixture of experts with only ~4B active per token, reaches
+106 t/s.
+
+So **if Qwen speed is what you want, use
+[UpinelAIOS-MLX](https://github.com/Upinel/UpinelAIOS-MLX)**: MTPLX's MTP
+implementation works on Metal and llama.cpp's does not, which is the clearest
+reason the two projects exist side by side.
 
 **Only one quant is downloaded.** GGUF repos often publish every quant of the
 same model, and the `31b-heretic` repo carries ten of them — 232 GB in total,
@@ -402,7 +401,7 @@ So uncensored Gemma 4 lives in **GGUF on llama.cpp**, where HauhauCS ships the
 whole uncensored family *with* companion draft models. That is what this bundle
 serves.
 
-### Speculative depth — the one speed knob that matters
+### Speculative depth: the one speed knob that matters
 
 Gemma 4 ships a small companion drafter. It is a real win here, unlike the MTP
 heads on the Qwen side. **Depth 3 is the default.**
@@ -558,39 +557,35 @@ See [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
 
 ### Measured throughput
 
-**M5 Pro (20-core GPU, 64 GB)**, 256 tokens generated, no speculative decoding
-for the small models because none of them ships a draft:
+**Measured on an M5 Pro (20-core GPU, 64 GB).** Decode is the rate once
+generating; prefill is the rate ingesting the prompt; TTFT is time to first
+token. Every model below is uncensored.
 
-| model | 512 ctx | 8k ctx | RAM |
-|---|---:|---:|---:|
-| **`e2b`** | **107 t/s** | **102 t/s** | 4.2 GB |
-| `26b-a4b` | 89 t/s | 66 t/s | 20.5 GB |
-| `e4b` | 62 t/s | 58 t/s | 6.8 GB |
+| model | decode | prefill | TTFT | when to use it |
+|---|---:|---:|---:|---|
+| **`26b-q4`** &nbsp;Gemma 4 26B-A4B Q4_0 QAT | **106.4 t/s** | 98 t/s | 1.1 s | **The default, and the fastest thing here.** MoE with ~4B active per token; this is the build the whole project is tuned around. |
+| `e2b` &nbsp;Gemma 4 E2B | 99.9 t/s | 294 t/s | 1.7 s | The snappy one: fastest prefill, smallest footprint, for a small Mac or quick replies. |
+| `26b-a4b` &nbsp;Gemma 4 26B-A4B Q4_K_M | 72.5 t/s | 271 t/s | 2.8 s | **Don't.** Same model, slower quant — `26b-q4` is ~47% faster and 3 GB smaller. |
+| `qwen-35b` &nbsp;Qwen 3.6 35B-A3B | 70.5 t/s | 180 t/s | 2.7 s | Works, but the [MLX project](https://github.com/Upinel/UpinelAIOS-MLX) runs this same model faster. |
+| `e4b` &nbsp;Gemma 4 E4B | 63.9 t/s | 84 t/s | 0.4 s | Only when the Mac genuinely cannot fit `26b-q4`. |
+| `12b` &nbsp;Gemma 4 12B | 54.5 t/s | 81 t/s | 2.6 s | The largest model that still fits a **16 GB** Mac. `e2b` is nearly twice as fast, so pick it for capability, not speed. |
+| `qwen-9b` &nbsp;Qwen 3.8 9B | 44.3 t/s | 130 t/s | 4.1 s | Use the **MLX** build instead — ~47% faster there. |
+| `qwen-27b` &nbsp;Qwen 3.8 27B | 13.5 t/s | 133 t/s | 9.1 s | Use the **MLX** build instead — ~2.6× faster there. |
 
-**`e2b` is the fastest model in the bundle** — quicker than the 26B MoE while
-using a fifth of the memory, and it holds above 100 t/s out to 8k context.
-`e4b` is the odd one out: bigger than `e2b` and slower than both it and the
-26B MoE, so there is little reason to choose it.
+**The default is also the fastest, which is the point.** `26b-q4` leads on decode
+at 106 t/s while being a 26B parameter model: it is Google's quantization-aware
+Q4_0 release of a mixture-of-experts checkpoint, so it reads only ~4B active
+parameters per token and stays small enough (15 GB) to leave room for a long
+context. Nothing else in this table wins on both counts.
 
-#### On an M1 MacBook Air
+> Prefill and TTFT above were measured on **short prompts**, where per-request
+> overhead dominates the figure. They are indicative of responsiveness, not of
+> long-context prefill — for that, see the scaling table below.
 
-Not measured here — this was built on an M5 Pro — but the estimate is
-straightforward, because decode is memory-bandwidth-bound and the M1 has
-roughly a quarter of an M5 Pro's bandwidth:
+#### How prefill behaves as context grows
 
-| model | estimated decode on M1 |
-|---|---:|
-| `e2b` | ~25 t/s |
-| `e4b` | ~15 t/s |
-
-Treat those as order-of-magnitude. Even the pessimistic end is a usable agent
-endpoint, and `e2b` at 4.2 GB is the right pick for an 8 GB Air.
-
-#### How speed scales with context
-
-**M5 Pro (20-core GPU, 64 GB), uncensored Gemma 4 26B-A4B**, shipped settings
-(`MTP_DEPTH=3`, `THINKING=off`). Decode is the rate once generating; prefill is
-the rate ingesting the prompt, and it is what time-to-first-token is made of.
+**M5 Pro, uncensored Gemma 4 26B MoE**, 512 prefill batches. Decode holds up;
+prefill is what costs you at long context, and TTFT is made of it.
 
 | context | decode | prefill | TTFT, cold | TTFT, warm |
 |---:|---:|---:|---:|---:|
@@ -598,22 +593,31 @@ the rate ingesting the prompt, and it is what time-to-first-token is made of.
 | 8k | 53 t/s | 860 t/s | 8.9 s | **0.41 s** |
 | 32k | **25 t/s** | 461 t/s | **63 s** | **0.68 s** |
 
-The model is a mixture of experts: 26B total but only about **4B active per
-token**, which is why it is both fast and small.
-
 The two right-hand columns are the ones that matter for an agent. A multi-turn
 agent re-sends its whole growing history every turn; because the server reuses
 that prefix from the KV cache, only the new tokens cost anything. Turn 2 of an
 8k conversation returns in **0.41 s** where the cold first turn took **8.9 s** —
 so the expensive event is the first turn of a session, not the twentieth.
 
-> **Cold prefill is the real long-context cost, measured.** At 32k the first
-> turn waits **63 seconds** before the first token. Prefill is architectural
-> here, not tunable: at 32k it sits at ~420 t/s whether batches are 512 or
-> 2048, because five of the thirty layers are full-attention and get
-> quadratically more expensive with context (the other 25 use a 1024-token
-> sliding window). Keep agent contexts under ~32k where the speed is, and let
-> KV reuse carry the rest.
+> **Cold prefill is the real long-context cost, and it is architectural.** At 32k
+> the first turn waits **63 seconds** before the first token. Prefill sits at
+> ~420 t/s at 32k whether batches are 512 or 2048, because five of the thirty
+> layers are full-attention and get quadratically more expensive with context
+> (the other 25 use a 1024-token sliding window). Keep agent contexts under ~32k
+> where the speed is, and let KV reuse carry the rest.
+
+#### On a smaller Mac
+
+Not measured here, but decode is memory-bandwidth-bound and an M1 MacBook Air
+has roughly a quarter of an M5 Pro's bandwidth. Order-of-magnitude:
+
+| model | estimated decode on M1 |
+|---|---:|
+| `e2b` | ~25 t/s |
+| `e4b` | ~15 t/s |
+
+Even the pessimistic end is a usable agent endpoint, and `e2b` at 4.2 GB is the
+right pick for an 8 GB Air.
 
 ### Measuring this yourself
 

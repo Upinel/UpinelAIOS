@@ -90,9 +90,9 @@ recommend_config() {
   # comfortably fits a 32 GB Mac.
   #
   # This recommends the alias 26b-q4, not the Q4_K_M build of the same model.
-  # Same weights, but Q4_0 QAT is ~22% faster to decode on Metal (119 vs 97
-  # t/s measured) and 15% smaller. Recommending the K-quant here would hand a
-  # fresh install a slower model than the one start.sh defaults to.
+  # Same weights, but Q4_0 QAT decodes ~47% faster on Metal (106.4 vs 72.5
+  # t/s measured) and is 15% smaller. Recommending the K-quant here would hand
+  # a fresh install a slower model than the one start.sh defaults to.
   if (( ram >= 48 )); then
     REC_MODEL="$(model_repo_for 26b-q4)"
     REC_WEIGHTS_GB=15
@@ -104,7 +104,7 @@ recommend_config() {
   else
     REC_MODEL="$(model_repo_for e2b)"
     REC_WEIGHTS_GB=4
-    REC_REASON_MODEL="${ram} GB is tight; E2B is the only model here that fits, at ~4.2 GB resident, and it still decodes at ~107 t/s"
+    REC_REASON_MODEL="${ram} GB is tight; E2B is the only model here that fits, at ~4.2 GB resident, and it still decodes at ~100 t/s"
   fi
 
   # Context and KV quant together have to fit the memory budget.
@@ -294,8 +294,8 @@ model_note() {
     31b-heretic) echo "dense 31B abliterated - the highest quality, and the slowest" ;;
     e4b)         echo "loses to both e2b and the 26B on every axis" ;;
     e2b)         echo "smallest, and the fastest small model: fits an 8 GB Mac" ;;
-    qwen-27b)    echo "dense 27B, ~14 t/s; its MTP head needs a build step (docs/GGUF-RUNTIME.md)" ;;
-    qwen-9b)     echo "dense 9B, ~41 t/s - no MTP head, so no speculative speedup" ;;
+    qwen-27b)    echo "dense 27B, ~13.5 t/s; its MTP head needs a build step - or use the MLX build (~2.6x faster)" ;;
+    qwen-9b)     echo "dense 9B, ~44 t/s - the MLX build is ~47% faster on this model" ;;
     qwen-35b)    echo "MoE like the default, different family (Qwen 3.6, not 3.8)" ;;
     *)           echo "" ;;
   esac

@@ -77,13 +77,13 @@ show_usage() {
 # (quantization-aware training, so it holds near-bf16 quality where a naive
 # Q4_0 would not). Measured on this machine, MTP depth 3, identical prompts:
 #
-#     quant     size      prefill    decode    draft acceptance
-#     -------   -------   -------    ------    ----------------
-#     Q4_K_M    16.80 GB   112 t/s    97.2 t/s       79%
-#     Q4_0 QAT  14.25 GB   129 t/s   119.1 t/s       82%
+#     quant     size      decode
+#     -------   -------   ------
+#     Q4_K_M    16.80 GB    72.5 t/s
+#     Q4_0 QAT  14.25 GB   106.4 t/s
 #
-# +22% decode, +15% prefill, 15% smaller. The existing MTP drafter works
-# with it unchanged; acceptance is slightly HIGHER than on Q4_K_M.
+# ~47% faster decode and 15% smaller. The existing MTP drafter works with it
+# unchanged, at slightly HIGHER acceptance than on Q4_K_M.
 MODEL_ALIASES="26b-q4 26b-a4b 12b 31b-heretic e4b e2b qwen-27b qwen-9b qwen-35b"
 
 model_repo_for() {

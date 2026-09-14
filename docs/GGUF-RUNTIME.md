@@ -157,16 +157,16 @@ The unpatched 27B runs at **7.6 t/s** here. That is not a bug: a dense 27B reads
 about 15 GB of active weights per token, and ~7.6 t/s is what this memory
 bandwidth supports. The Qwen 27B is a *dense* model — every parameter is active
 on every token — unlike the Gemma 26B A4B, which is a mixture of experts with
-only ~4B active and reaches 119 t/s for exactly that reason.
+only ~4B active and reaches 106 t/s for exactly that reason.
 
 So the two families are not comparable on speed and should not be sold as if
 they are:
 
-| model | shape | active per token | decode here |
-|---|---|---:|---:|
-| `26b-q4` (Gemma 4) | MoE, 8 of 128 experts | ~4B | 119 t/s |
-| `qwen-9b` | dense | 9B | 41 t/s |
-| `qwen-27b` | dense | 27B | 7.6 t/s |
+| model | shape | active per token | decode here (GGUF) | MLX |
+|---|---|---:|---:|---:|
+| `26b-q4` (Gemma 4) | MoE, 8 of 128 experts | ~4B | **106.4 t/s** | — |
+| `qwen-9b` | dense | 9B | 44.3 t/s | 65.1 t/s |
+| `qwen-27b` | dense | 27B | 13.5 t/s | 34.7 t/s |
 
 If you want Qwen 27B speed, the honest answer is the **MLX project**: MTPLX's
 MTP implementation works on Metal and llama.cpp's does not, which is the single
