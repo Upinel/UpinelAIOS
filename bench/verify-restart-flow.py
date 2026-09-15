@@ -32,8 +32,16 @@ The third bug only exists because the banner runs after the picker, so nothing
 here can be checked by reading the source alone. This drives the real scripts
 through a pty, answers the picker, and inspects what they printed.
 
-The scripts are killed as soon as the banner is out, before they load a model,
-so this stays fast and does not start a server.
+The scripts are killed as soon as the banner is out, before they load a model.
+Two things that has to get right, both learned the hard way:
+
+  * The kill goes to the whole process group. Killing only the shell leaves the
+    server it spawned running, and that server inherits this process's stdout -
+    so the pipe never closes and anything capturing this test's output hangs
+    forever. That is a nasty failure mode for a suite that is supposed to be
+    safe to run while you work.
+  * A server that was already running when this started is left alone. Only one
+    this test started is stopped again, checked against the pid file.
 
 Run:  python3 bench/verify-restart-flow.py
 """
@@ -99,11 +107,7 @@ def drive(script, answer, stop_marker, timeout=90):
             if "unbound variable" in buf or "command not found" in buf:
                 break
     finally:
-        try:
-            os.kill(pid, signal.SIGKILL)
-            os.waitpid(pid, 0)
-        except OSError:
-            pass
+        reap(pid)
         try:
             os.close(fd)
         except OSError:
@@ -111,8 +115,74 @@ def drive(script, answer, stop_marker, timeout=90):
     return ANSI.sub("", buf)
 
 
+def reap(pid, tries=40, pause=0.05):
+    """Kill the child and its group, and never block waiting for it.
+
+    os.waitpid(pid, 0) waits forever if the child cannot be reaped, and this
+    test hung a whole verify-all run that way - stuck in __wait4 with the pty
+    still open. A test that hangs is worse than one that fails: it takes the
+    suite with it and leaves whoever ran it guessing.
+
+    The group kill matters too, but for a different reason: a shell that has
+    already reached "start" has a server under it, that server inherits our
+    stdout, and a leaked one keeps the pipe open so anything capturing this
+    output waits forever.
+    """
+    for sig in (signal.SIGKILL,):
+        try:
+            os.killpg(os.getpgid(pid), sig)
+        except OSError:
+            try:
+                os.kill(pid, sig)
+            except OSError:
+                return
+        for _ in range(tries):
+            try:
+                done, _ = os.waitpid(pid, os.WNOHANG)
+            except ChildProcessError:
+                return
+            except OSError:
+                return
+            if done:
+                return
+            time.sleep(pause)
+
+
+def server_pid():
+    """Pid of a running server, or None. Read through the real helper so this
+    agrees with the scripts about what counts as running."""
+    try:
+        out = subprocess.run(
+            ["bash", "-c",
+             f'source {REPO}/lib/common.sh; load_config; '
+             'pid_alive && cat "$PID_FILE"'],
+            capture_output=True, text=True, timeout=30)
+        return out.stdout.strip() or None
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def stop_if_we_started_it(was):
+    """Leave the machine as we found it.
+
+    Driving ./restart.sh can start a server if it gets past the banner before
+    the kill lands. Stopping it matters for more than tidiness: the server
+    inherits stdout, so a leaked one hangs whoever piped this test's output.
+    """
+    now = server_pid()
+    if now and now != was:
+        subprocess.run([f"{REPO}/stop.sh"], capture_output=True, timeout=120)
+        time.sleep(1)
+        return True
+    return False
+
+
 def main():
     print("\n  Model picker path in start/restart\n")
+    before = server_pid()
+    # Belt and braces: if anything here wedges, say so and exit rather than
+    # taking the whole suite with it.
+    signal.alarm(180)
 
     # One drive of restart.sh with the picker showing. --print is not usable
     # here: it skips the picker, so the output carries no model rows and the
@@ -155,9 +225,19 @@ def main():
     check("a model we do not ship is labelled as such",
           "not one we ship" in listing, True)
 
+    if stop_if_we_started_it(before):
+        print("  (stopped a server this test started)")
+
     print(f"\n  {PASSED} passed, {FAILED} failed\n")
     return 1 if FAILED else 0
 
 
+def _timeout(_sig, _frm):
+    print("\n  [FAIL] the picker drive did not finish within 180s; exiting so the\n"
+          "         rest of the suite can run.\n", flush=True)
+    os._exit(1)
+
+
 if __name__ == "__main__":
+    signal.signal(signal.SIGALRM, _timeout)
     sys.exit(main())
