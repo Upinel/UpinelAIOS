@@ -16,7 +16,7 @@
 #   ./start.sh                 start in the background (default)
 #   ./start.sh --foreground    run attached to this terminal (Ctrl-C to stop)
 #   ./start.sh --print         print the command it would run, then exit
-#   ./start.sh --model moe     serve a different model for this run only
+#   ./start.sh --model mlx-q-9b   serve a different model for this run only
 #
 # The engine is not a setting. A model belongs to exactly one runtime - a GGUF
 # checkpoint can only run on llama.cpp, an MTPLX pack can only run on MTPLX - so

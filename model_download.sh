@@ -131,7 +131,7 @@ list_models() {
   log "  ${C_DIM}Downloading from an engine you do not have yet offers to install it.${C_RESET}"
   log ""
   log "  Download one:   ./model_download.sh 12b"
-  log "  Switch to one:  ./model_download.sh --switch 12b"
+  log "  Switch to one:  ./model_download.sh --switch gguf-g-12b"
   log "  ${C_DIM}Your own model: any owner/name Hugging Face repo works, e.g.${C_RESET}"
   log "  ${C_DIM}  ./model_download.sh someone/some-uncensored-GGUF${C_RESET}"
   log "  ${C_DIM}  ./model_download.sh --engine mlx someone/some-MTPLX-pack${C_RESET}"
@@ -254,7 +254,7 @@ case "${1:-}" in
     ok "All known models are on disk."
     ;;
   --switch)
-    [[ -n "${2:-}" ]] || die "--switch needs a model, e.g. ./model_download.sh --switch 12b"
+    [[ -n "${2:-}" ]] || die "--switch needs a model, e.g. ./model_download.sh --switch gguf-g-12b"
     switch_to "$2"
     ;;
   -*)  die "Unknown argument: $1  (try --help)" ;;

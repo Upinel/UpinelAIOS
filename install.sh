@@ -16,7 +16,7 @@
 #   ./install.sh                 scan hardware, suggest settings, install
 #   ./install.sh --yes           accept the suggested settings without asking
 #   ./install.sh --no-tune       skip the (slow) speculative depth sweep
-#   ./install.sh --deps-only     only install llama.cpp
+#   ./install.sh --deps-only     only install the runtime (either engine)
 #   ./install.sh --model-only    only download and verify the model
 #   ./install.sh --scan-only     print the hardware scan and suggestions, stop
 #   ./install.sh --model REPO    use this model instead of env.conf's
@@ -458,16 +458,31 @@ if (( DO_DEPS == 0 && DO_MODEL == 0 && DO_TUNE == 0 )); then
 fi
 
 step "Install complete"
+# The point of the install is an endpoint an agent can use, so the completion
+# message says how to reach it rather than only how to start it. The max_tokens
+# note is here because the first failure most people hit is an empty reply: a
+# thinking model spends the whole budget reasoning and never emits the answer.
 cat <<EOF
 
-  Start the server:      ./start.sh
-  Watch it live:         ./status.sh
-  Verify tool calling:   ./bench/verify-tools.sh
-  Measure tok/s:         ./bench/bench.sh
-  Re-tune MTP depth:     ./bench/bench.sh --tune
-  Apply env.conf changes: ./restart.sh
-  Stop it:               ./stop.sh
+  ${C_BOLD}Start it${C_RESET}              ./start.sh
+  ${C_BOLD}Talk to it${C_RESET}            ./chat.sh
+  ${C_BOLD}Watch it live${C_RESET}         ./status.sh
 
-  Config lives in:       env.conf
+  ${C_BOLD}Point an agent at it${C_RESET}
+    base URL          http://$(lan_ip):$PORT/v1
+    API key           ./status.sh --key
+    model name        $SERVED_MODEL_NAME
+
+  Verify tool calls  ./bench/verify-tools.sh
+  Measure tokens/s   ./bench/bench.sh
+  Apply config edits ./restart.sh
+  Stop it            ./stop.sh
+
+  Config             env.conf
+  Models             $MODELS_DIR
+
+  ${C_DIM}Agent tip: give it max_tokens 2048 or more. Thinking is emitted before
+  the answer and before any tool call, so a small budget truncates both.
+  THINKING="off" in env.conf removes the risk entirely and is faster.${C_RESET}
 
 EOF

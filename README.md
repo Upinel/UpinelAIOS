@@ -131,7 +131,7 @@ option actually needs, measured as resident set size:
 | `gguf-g-12b` | 7.4 GB | ~10 GB | 16 GB Mac |
 | `gguf-g-31b` | 17.8 GB | ~22 GB | 32 GB Mac |
 
-On an 8 GB Mac set `MODEL="e2b"`, `CONTEXT_WINDOW=8192` and
+On an 8 GB Mac set `MODEL="gguf-g-e2b"`, `CONTEXT_WINDOW=8192` and
 `MEMORY_LIMIT_GB=6`. macOS itself wants 3–4 GB, so leave it that room. On a
 16 GB Mac, `gguf-g-e2b` is comfortable, `gguf-g-12b` is the largest model that fits, and the
 default `gguf-g-26ba4b` does not — it wants ~19 GB with its context.
@@ -453,7 +453,7 @@ this existed gets repaired rather than left quietly slower.
 ./bench/verify-tools.sh            # check tool calling, measure a file write
 ./model_download.sh                # what is available, what you have
 ./model_download.sh gguf-g-12b            # download one
-./model_download.sh --switch 12b   # download if needed, switch, restart
+./model_download.sh --switch gguf-g-12b   # download if needed, switch, restart
 ./start.sh --model gguf-g-12b             # serve a different model for one run
 ```
 
