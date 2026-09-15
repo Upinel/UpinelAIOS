@@ -13,7 +13,7 @@
 <h1 align="center">UpinelAIOS</h1>
 
 <p align="center">
-  <b>Up to 106 t/s decode — uncensored, 100% local, on your own Mac.</b><br>
+  <b>Up to 141 t/s decode — uncensored, 100% local, on your own Mac.</b><br>
   One-click AI agent server OS for Apple Silicon · <b>two engines</b>: GGUF (llama.cpp) and MLX (MTPLX)<br>
   <sub>Extreme performance optimisation for AI agent workflows.</sub><br>
   <sub>One command to install. One command to serve. Your data never leaves the LAN.</sub>
@@ -94,12 +94,14 @@ runtimes:
 | **Qwen 3.8** | `gguf-q-27b`, `gguf-q-9b`, `gguf-q-35ba3b` | llama.cpp |
 | **Qwen 3.8 / 3.6** | `mlx-q-35ba3b`, `mlx-q-27b-4bit`, `mlx-q-27b-6bit`, `mlx-q-9b` | MLX / MTPLX |
 
-Built and measured on an **M5 Pro / 20-core GPU / 64 GB**, serving
-`OS-Software/gemma-4-26B-A4B-it-qat-q4_0-heretic-ja-GGUF` through llama.cpp with
-a companion MTP draft model:
+Built and measured on an **M5 Pro / 20-core GPU / 64 GB**, across both engines:
+`hawhyhb/Qwen3.6-35B-A3B-...-MTPLX-4bit` on MLX, and
+`OS-Software/gemma-4-26B-A4B-it-qat-q4_0-heretic-ja-GGUF` on llama.cpp with a
+companion MTP draft model:
 
 ```
-106 t/s decode, 1.1 s TTFT     (uncensored MoE, ~4B active per token)
+141 t/s decode, 4.6 s TTFT     (35B MoE, ~3B active, MLX, tuned)
+106 t/s decode, 0.4 s TTFT     (26B MoE, ~4B active, llama.cpp)
  99 t/s on the small E2B, if you want it snappier
 256K context supported, 131K default
 OpenAI-compatible API on your LAN, plus vision when you want it
@@ -265,15 +267,15 @@ to decide.
 
 | | engine | what it is for | best decode |
 |---|---|---|---:|
-| ![GGUF](https://img.shields.io/badge/GGUF-llama.cpp-F2B93B?style=flat-square) | llama.cpp | Gemma 4 at peak speed, plus vision | **106 t/s** |
-| ![MLX](https://img.shields.io/badge/MLX-MTPLX-B9A5FF?style=flat-square) | MLX / MTPLX | anything Qwen — up to **2.2×** llama.cpp on the same model | **98 t/s** |
+| ![GGUF](https://img.shields.io/badge/GGUF-llama.cpp-F2B93B?style=flat-square) | llama.cpp | Gemma 4, plus vision | **106 t/s** |
+| ![MLX](https://img.shields.io/badge/MLX-MTPLX-B9A5FF?style=flat-square) | MLX / MTPLX | anything Qwen — up to **2.2×** llama.cpp on the same model | **141 t/s** |
 
 `./install.sh` recommends one model from **each** engine — the fastest in that
 engine this Mac can actually load — and lets you choose:
 
 ```
   1  GGUF gguf-g-26ba4b     15 GB  uncensored MoE, 3B active - 106 t/s
-  2  MLX  mlx-q-35ba3b      22 GB  35B MoE - fastest Qwen (~98 t/s)
+  2  MLX  mlx-q-35ba3b      22 GB  35B MoE - fastest here (141 t/s)
   3  both                       install both engines and both models
   4  your                       your own Hugging Face repo (owner/name)
 ```
@@ -321,14 +323,20 @@ and a new model cannot be added without declaring one:
 | `gguf-g-31b` | GGUF | Gemma 4 31B heretic — highest quality dense | — | — |
 | `gguf-g-e4b` | GGUF | Gemma 4 E4B — only if `26ba4b` will not fit | 63.9 t/s | 84 t/s |
 | **`mlx-q-35ba3b`** | **MLX** | Qwen 3.6 35B-A3B MoE — **the MLX default** | **~141 t/s** | **~1,760 t/s** |
-| `mlx-q-27b-4bit` | MLX | Qwen 3.8 27B dense — the quality pick | ~30 t/s | ~330 t/s |
-| `mlx-q-9b` | MLX | Qwen 3.8 9B — only when memory is tight | ~90 t/s | ~1,390 t/s |
+| `mlx-q-27b-4bit` | MLX | Qwen 3.8 27B dense — the quality pick | ~30 t/s `*` | ~330 t/s |
+| `mlx-q-9b` | MLX | Qwen 3.8 9B — only when memory is tight | ~113 t/s | ~1,340 t/s |
 | `gguf-q-27b` / `gguf-q-9b` / `gguf-q-35ba3b` | GGUF | the same Qwen models through llama.cpp | — | — |
 
-Measured on an M5 Pro **at 8k context**, which is what an agent actually pays.
-Decode is higher at short context — `gguf-g-26ba4b` reaches ~104 t/s at 512
-tokens — and lower far out; at 32k it reads ~58 t/s. Old aliases (`26b-q4`,
-`moe`, `4bit`, …) still work, with a warning naming the replacement.
+Measured on an M5 Pro. **Every figure is at 8k context**, which is what an agent
+actually pays, with the tuned defaults — except `mlx-q-27b-4bit`, which is
+carried over from an earlier run and marked `*`. Decode is higher at short
+context (`gguf-g-26ba4b` peaks at ~106 t/s at 512 tokens) and lower far out (58
+t/s at 32k). Old aliases (`26b-q4`, `moe`, `4bit`, …) still work, with a warning
+naming the replacement.
+
+`*` `mlx-q-27b-4bit` has not been re-measured since the KV and depth changes, so
+its number is a floor rather than a current figure. Its two smaller siblings both
+improved by a third or more, so expect better than this.
 
 > **Every MLX figure above was re-measured.** The tables used to report **32 t/s**
 > prefill for `mlx-q-35ba3b`, roughly 47× too low. That was a measurement
@@ -341,7 +349,7 @@ tokens — and lower far out; at 32k it reads ~58 t/s. Old aliases (`26b-q4`,
 >
 > | model | decode was | decode now | prefill was | prefill now |
 > |---|---:|---:|---:|---:|
-> | `mlx-q-35ba3b` | 79.4 | **~98** | 32 | **~1,520** |
+> | `mlx-q-35ba3b` | 79.4 | **~141** | 32 | **~1,760** |
 > | `mlx-q-27b-4bit` | 34.7 | **~30** | — | **~330** |
 > | `mlx-q-9b` | 65.1 | **~90** | — | **~1,390** |
 >
@@ -366,6 +374,19 @@ config equally.
 | **`mlx-q-35ba3b` after** | **141.2 t/s** | **1,762 t/s** | **4.56 s** |
 | `gguf-g-26ba4b` before | 85.8 t/s | 1,360 t/s | 5.91 s |
 | **`gguf-g-26ba4b` after** | **89.0 t/s** | **1,388 t/s** | **5.79 s** |
+
+At 8k the MLX gain is the headline and the GGUF gain is small — but 8k is not
+where a long conversation lives. At 32k the GGUF improvement is the whole
+point, and it is the same change that did it: f16 KV, whose per-token
+dequantisation cost grows with the context it is spread over.
+
+| at 32k context | before | after |
+|---|---:|---:|
+| `gguf-g-26ba4b` decode | 46.7 t/s | **58.4 t/s** (+25%) |
+| `gguf-g-26ba4b` prefill | 742 t/s | 691 t/s |
+
+That last row is the trade honestly stated: f16 buys decode at long context and
+costs a little prefill. The `writer` profile is the one that cares.
 
 Two changes did that. **MTP depth is now tuned per model** rather than fixed at
 3 for everything: the 35B prefers depth 1 (worth 34% there), the Gemma prefers
@@ -428,7 +449,7 @@ row marked with a verdict for *your* memory:
     6  gguf-q-27b        19 GB  fits comfortably     dense 27B, ~13.5 t/s; its MTP head needs a build step
     7  gguf-q-9b         6 GB   fits comfortably     dense 9B, ~44 t/s - the MLX build is about twice this
     ...
-    9  mlx-q-35ba3b      22 GB  fits comfortably     35B MoE, ~3B active - fastest Qwen here (~98 t/s)
+    9  mlx-q-35ba3b      22 GB  fits comfortably     35B MoE, ~3B active - fastest here (141 t/s)
    10  mlx-q-27b-4bit    19 GB  fits comfortably     dense 27B 4-bit - the quality pick (~30 t/s)
     ...
    14  mlx-q-9b          6 GB   fits comfortably     dense 9B (~90 t/s) - only when memory is tight
@@ -448,7 +469,7 @@ something that will not fit is allowed; it warns, then does what you asked.
 
 | alias | download | repo |
 |---|---:|---|
-| **`gguf-g-26ba4b`** | 15 GB | `OS-Software/gemma-4-26B-A4B-it-qat-q4_0-heretic-ja-GGUF` — **default**, 106.4 t/s, Q4_0 QAT |
+| **`gguf-g-26ba4b`** | 15 GB | `OS-Software/gemma-4-26B-A4B-it-qat-q4_0-heretic-ja-GGUF` — **default**, Q4_0 QAT, 106 t/s at short context (89 at 8k) |
 | `gguf-g-e2b` | 4 GB | `HauhauCS/Gemma-4-E2B-Uncensored-HauhauCS-Aggressive` — 99.9 t/s. Smallest, fits 8 GB. |
 | `gguf-g-e4b` | 6 GB | `HauhauCS/Gemma-4-E4B-Uncensored-HauhauCS-Aggressive` — 63.9 t/s. Only if `gguf-g-26ba4b` will not fit. |
 | `gguf-g-12b` | 8 GB | `HauhauCS/Gemma4-12B-QAT-Uncensored-HauhauCS-Balanced` — 54.5 t/s. Largest that fits a 16 GB Mac. |
@@ -777,25 +798,37 @@ See [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
 generating; prefill is the rate ingesting the prompt; TTFT is time to first
 token. Every model below is uncensored.
 
+Every figure at **8k context**, which is what an agent actually pays, with the
+tuned defaults. Decode is higher at short context and lower far out — the peak
+and the 32k figure are in the notes column.
+
 | model | decode | prefill | TTFT | when to use it |
 |---|---:|---:|---:|---|
-| **`gguf-g-26ba4b`** &nbsp;Gemma 4 26B-A4B Q4_0 QAT | **106.4 t/s** | 98 t/s | 1.1 s | **The default, and the fastest thing here.** MoE with ~4B active per token; this is the build the whole project is tuned around. |
-| `gguf-g-e2b` &nbsp;Gemma 4 E2B | 99.9 t/s | 294 t/s | 1.7 s | The snappy one: fastest prefill, smallest footprint, for a small Mac or quick replies. |
-| `gguf-q-35ba3b` &nbsp;Qwen 3.6 35B-A3B | 70.5 t/s | 180 t/s | 2.7 s | Works, but the **MLX engine** runs this same model faster. |
-| `gguf-g-e4b` &nbsp;Gemma 4 E4B | 63.9 t/s | 84 t/s | 0.4 s | Only when the Mac genuinely cannot fit `gguf-g-26ba4b`. |
-| `gguf-g-12b` &nbsp;Gemma 4 12B | 54.5 t/s | 81 t/s | 2.6 s | The largest model that still fits a **16 GB** Mac. `gguf-g-e2b` is nearly twice as fast, so pick it for capability, not speed. |
-| `gguf-q-9b` &nbsp;Qwen 3.8 9B | 44.3 t/s | 130 t/s | 4.1 s | Use the **MLX** build instead — about twice this (~90 t/s). |
-| `gguf-q-27b` &nbsp;Qwen 3.8 27B | 13.5 t/s | 133 t/s | 9.1 s | Use the **MLX** build instead — ~2.2× faster there. |
+| **`mlx-q-35ba3b`** &nbsp;Qwen 3.6 35B-A3B MoE | **141 t/s** | 1,760 t/s | 4.6 s | **The fastest decode measured**, and the number in the headline. A MoE reading ~3B active per token; peaks at 8k, which is unusual and is why it wins here. |
+| **`gguf-g-26ba4b`** &nbsp;Gemma 4 26B-A4B Q4_0 QAT | **89 t/s** | 1,390 t/s | 5.8 s | **The default**, and the fastest *and* highest quality llama.cpp can serve here, with vision. Peaks at 106 t/s at 512 tokens; 58 t/s at 32k. |
+| `mlx-q-9b` &nbsp;Qwen 3.8 9B | 113 t/s | 1,340 t/s | 5.9 s | Nearly the speed of the 35B at a quarter of the memory. |
+| `gguf-g-e2b` &nbsp;Gemma 4 E2B | 99.9 t/s `*` | 294 t/s | 1.7 s | The snappy one: fastest prefill, smallest footprint, for a small Mac or quick replies. |
+| `gguf-q-35ba3b` &nbsp;Qwen 3.6 35B-A3B | 70.5 t/s `*` | 180 t/s | 2.7 s | Works, but the **MLX engine** runs this same model faster. |
+| `gguf-g-e4b` &nbsp;Gemma 4 E4B | 63.9 t/s `*` | 84 t/s | 0.4 s | Only when the Mac genuinely cannot fit `gguf-g-26ba4b`. |
+| `gguf-g-12b` &nbsp;Gemma 4 12B | 54.5 t/s `*` | 81 t/s | 2.6 s | The largest model that still fits a **16 GB** Mac. `gguf-g-e2b` is nearly twice as fast, so pick it for capability, not speed. |
+| `gguf-q-9b` &nbsp;Qwen 3.8 9B | 44.3 t/s `*` | 130 t/s | 4.1 s | Use the **MLX** build instead — `mlx-q-9b` is about twice this. |
+| `gguf-q-27b` &nbsp;Qwen 3.8 27B | 13.5 t/s `*` | 133 t/s | 9.1 s | Use the **MLX** build instead — ~2.2× faster there. |
 
-**The default is also the fastest, which is the point.** `gguf-g-26ba4b` leads on decode
-at 106 t/s while being a 26B parameter model: it is Google's quantization-aware
-Q4_0 release of a mixture-of-experts checkpoint, so it reads only ~4B active
-parameters per token and stays small enough (15 GB) to leave room for a long
-context. Nothing else in this table wins on both counts.
+`*` measured before the KV and depth changes, on a short prompt. Those rows have
+not been re-measured, so treat them as a floor: the two that *were* re-measured
+both improved, one by 59%.
 
-> Prefill and TTFT above were measured on **short prompts**, where per-request
-> overhead dominates the figure. They are indicative of responsiveness, not of
-> long-context prefill — for that, see the scaling table below.
+**The default is not the fastest, and that is deliberate.** `gguf-g-26ba4b` at
+89 t/s gives up the top of the table to `mlx-q-35ba3b`, and takes it back on
+everything else: it is Google's quantization-aware Q4_0 release of a
+mixture-of-experts checkpoint, so it reads only ~4B active parameters per token
+and stays small enough (15 GB) to leave room for a long context — with vision,
+and with an MTP draft head that turns speculation on. `mlx-q-35ba3b` cannot do
+vision and has no such margin.
+
+> TTFT above is at 8k. At short prompts per-request overhead dominates the
+> figure and it looks better; the scaling table below is the honest long-context
+> picture.
 
 #### How prefill behaves as context grows
 

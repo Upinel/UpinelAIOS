@@ -1191,7 +1191,7 @@ class Dashboard:
         pad = max(1, width - len(strip_ansi(title)) - len(strip_ansi(status))
                   - len(clock) - 4)
         L.append(f"{title}{' ' * pad}{status}  {DIM}{clock}{RESET}")
-        L.append(f"{DIM}  Upinel's One-Click AI Agent Server OS for Mac (GGUF){RESET}")
+        L.append(f"{DIM}  Upinel's One-Click AI Agent Server OS for Mac{RESET}")
         L.append(DIM + "\u2500" * width + RESET)
 
         key = cfg.get("api_key") or "(none - loopback only)"
