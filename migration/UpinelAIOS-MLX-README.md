@@ -33,9 +33,9 @@ git clone https://github.com/Upinel/UpinelAIOS && cd UpinelAIOS
 
 ## What changed, and why
 
-This repo was the MLX/MTPLX edition: Qwen through MTPLX, up to 2.6× llama.cpp
+This repo was the MLX/MTPLX edition: Qwen through MTPLX, up to 2.2× llama.cpp
 on the same model. That work was not thrown away — it is the other half of the
-merged project.
+merged project, and it is where the fastest decode in the merged repo comes from.
 
 The two editions existed because the runtimes were assumed to be exclusive. They
 are not, because **the engine is a property of the model, not of the install**:
@@ -44,7 +44,7 @@ are not, because **the engine is a property of the model, not of the install**:
 |---|---|---|
 | Gemma 4 (`gguf-g-*`) | llama.cpp | MTPLX cannot serve Gemma 4 — it needs a target/assistant pair, and the only ones that exist are built from aligned models |
 | Qwen (`gguf-q-*`) | llama.cpp | works, but MTPLX's MTP runs it faster on Metal |
-| Qwen (`mlx-q-*`) | MLX / MTPLX | up to **2.6×** llama.cpp on the same model |
+| Qwen (`mlx-q-*`) | MLX / MTPLX | up to **2.2×** llama.cpp on the same model |
 
 So `./install.sh` in the merged repo offers one model from each engine — the
 fastest in that engine your Mac can actually load — and lets you take either or
@@ -63,12 +63,18 @@ its tags; it is simply no longer the thing to clone.
   `4bit`, `6bit`, `27b-3bit`, `27b-4bit`, `9b` and `moe` all still resolve, and
   `27b-4bit` still means the barozp build rather than the itrejomx one.
 - **One number here was wrong.** This edition's README reported **32 t/s**
-  prefill for the 35B MoE. That is ~47× below the real figure and was a
+  prefill for the 35B MoE. That was ~47× below the real figure and was a
   measurement artifact, not a property of MLX: the benchmark reused one prompt,
-  so every run after the first hit the server's prefix cache. `mlx-q-35ba3b`
-  measures **~500 t/s at 512 tokens and ~1,520 t/s at 8k, cold**. The bug is
-  fixed in the merged repo's `bench.py`, which now sends a unique prompt per
-  repeat. If you quoted the old number, it is worth correcting.
+  so every run after the first hit the server's prefix cache. The bug is fixed
+  in the merged repo's `bench.py`, which now sends a unique prompt per repeat.
+  Re-measured there, `mlx-q-35ba3b` does **~880 t/s prefill at 512 tokens and
+  ~1,760 t/s at 8k, cold**, and **141 t/s decode** — the headline figure for the
+  merged project. If you quoted the old numbers, they are worth correcting.
+
+  The old decode figure for that model was 79.4 t/s. Part of the gap is the
+  benchmark fix; the rest is tuning that lives in the merged repo, where the
+  KV cache is left unquantised and the MTP depth is swept per model. Neither is
+  something you can get by editing settings here.
 
 - **Licence** — the same [Upinel Personal Free License](LICENSE), byte-identical
   (`SHA-256 0906eccc1ebc7e22f8de876997a4f33b7b85c3516d2c5a28796aad759fde7ff7`).
