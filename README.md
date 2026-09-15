@@ -10,11 +10,11 @@
   "Make it work, make it right, make it fast - then measure it, because
    the third one is only a claim until the numbers agree."
 -->
-<h1 align="center">UpinelAIOS-GGUF</h1>
+<h1 align="center">UpinelAIOS</h1>
 
 <p align="center">
   <b>Up to 106 t/s decode — uncensored, 100% local, on your own Mac.</b><br>
-  One-click AI agent server OS for Apple Silicon · GGUF / llama.cpp<br>
+  One-click AI agent server OS for Apple Silicon · <b>two engines</b>: GGUF (llama.cpp) and MLX (MTPLX)<br>
   <sub>Extreme performance optimisation for AI agent workflows.</sub><br>
   <sub>One command to install. One command to serve. Your data never leaves the LAN.</sub>
 </p>
@@ -84,6 +84,7 @@ Clone it, run `./install.sh`, run `./start.sh`. Nothing else.
 - [Quick start](#quick-start)
   - [Chatting from the terminal](#chatting-from-the-terminal)
 - [Configure it](#configure-it)
+  - [Two engines, one server](#two-engines-one-server)
   - [Models: uncensored only](#models-uncensored-only)
     - [Gemma 4](#gemma-4)
     - [Qwen](#qwen)
@@ -221,6 +222,50 @@ ai  ▸ ...
 ---
 
 ## Configure it
+
+### Two engines, one server
+
+UpinelAIOS serves through either of two runtimes, and **the engine follows the
+model** — a GGUF checkpoint can only run on llama.cpp, an MTPLX pack can only
+run on MTPLX. So choosing a model chooses the engine, and there is nothing else
+to decide.
+
+| | engine | what it is for | best decode |
+|---|---|---|---:|
+| ![GGUF](https://img.shields.io/badge/GGUF-llama.cpp-F2B93B?style=flat-square) | llama.cpp | Gemma 4 at peak speed, plus vision | **106 t/s** |
+| ![MLX](https://img.shields.io/badge/MLX-MTPLX-B9A5FF?style=flat-square) | MLX / MTPLX | anything Qwen — up to **2.6×** llama.cpp on the same model | **79 t/s** |
+
+`./install.sh` recommends a model for **each** engine and lets you choose:
+
+```
+  1  GGUF gguf-g-26ba4b     15 GB  uncensored MoE, 3B active - 106 t/s
+  2  MLX  mlx-q-35ba3b      22 GB  35B MoE - fastest Qwen (~79 t/s)
+  3  both                       install both engines and both models
+```
+
+Pick 3 and you get both runtimes and both models; each is served by whatever
+`./start.sh` or the `./model_download.sh` picker selects afterwards.
+
+#### Aliases name their engine
+
+Every alias is `{engine}-{family}-{size}`, so the runtime is visible at a glance
+and a new model cannot be added without declaring one:
+
+| alias | engine | model | decode |
+|---|---|---|---:|
+| **`gguf-g-26ba4b`** | GGUF | Gemma 4 26B-A4B Q4_0 QAT — **the default** | **106.4 t/s** |
+| `gguf-g-e2b` | GGUF | Gemma 4 E2B — snappiest first token | 99.9 t/s |
+| `gguf-g-12b` | GGUF | Gemma 4 12B — largest that fits a 16 GB Mac | 54.5 t/s |
+| `gguf-g-26ba4b-q4km` | GGUF | the same MoE in Q4_K_M — ~47% slower, skip it | 72.5 t/s |
+| `gguf-g-31b` | GGUF | Gemma 4 31B heretic — highest quality dense | — |
+| `gguf-g-e4b` | GGUF | Gemma 4 E4B — only if `26ba4b` will not fit | 63.9 t/s |
+| **`mlx-q-35ba3b`** | **MLX** | Qwen 3.6 35B-A3B MoE — **the MLX default** | **79.4 t/s** |
+| `mlx-q-27b-4bit` | MLX | Qwen 3.8 27B dense — the quality pick | 34.7 t/s |
+| `mlx-q-9b` | MLX | Qwen 3.8 9B — only when memory is tight | 65.1 t/s |
+| `gguf-q-27b` / `gguf-q-9b` / `gguf-q-35ba3b` | GGUF | the same Qwen models through llama.cpp | — |
+
+Measured on an M5 Pro. Old aliases (`26b-q4`, `moe`, `4bit`, …) still work, with
+a warning naming the replacement.
 
 ### Models: uncensored only
 

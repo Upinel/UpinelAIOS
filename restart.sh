@@ -40,7 +40,7 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 
-step "UpinelAIOS-GGUF restart"
+step "UpinelAIOS restart"
 
 # ── what is about to change ──────────────────────────────────────────────────
 if [[ -f "$CONFIG_SNAPSHOT_FILE" ]] && ! diff -q <(config_fingerprint) \
@@ -72,13 +72,26 @@ if (( ! PRINT_ONLY )); then
   fi
 fi
 
+# Resolve the engine before the banner, so it reports the shape the server
+# will actually start with rather than one engine's fields on the other's run.
+MODEL_REPO_R="$(model_repo_for "$MODEL")"
+MODEL_ALIAS_R="$(alias_for_repo "$MODEL_REPO_R")"
+ENGINE_R="$(model_engine_for "${MODEL_ALIAS_R:-$MODEL_REPO_R}")"
+[[ -n "$ENGINE_R" ]] || ENGINE_R="$(engine_for_dir "$MODELS_DIR/${MODEL_REPO_R//\//--}")"
+
 log ""
 log "  ${C_BOLD}Starting with:${C_RESET}"
+log "    engine     $(load_engine "$ENGINE_R" >/dev/null 2>&1; engine_name)"
 log "    model      $MODEL_REPO"
 log "    served as  $SERVED_MODEL_NAME"
-log "    context    $CONTEXT_WINDOW   KV $KV_QUANT   speculative depth $EFFECTIVE_DEPTH"
-log "    thinking   $THINKING"
-log "    memory     ${MEMORY_LIMIT_GB} GB cap"
+log "    context    $CONTEXT_WINDOW   KV $(kv_quant_for "$ENGINE_R")"
+if [[ "$ENGINE_R" == "mlx" ]]; then
+  log "    profile    $PROFILE   thinking $THINKING   history $PRESERVE_THINKING"
+  log "    memory     ${MEMORY_LIMIT_GB} GB cap   session bank ${SESSION_BANK_GB} GB"
+else
+  log "    depth      $EFFECTIVE_DEPTH   thinking $THINKING"
+  log "    memory     ${MEMORY_LIMIT_GB} GB cap"
+fi
 log "    network    $HOST:$PORT"
 log ""
 

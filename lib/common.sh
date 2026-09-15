@@ -723,6 +723,38 @@ prefill_chunk_for() {
   esac
 }
 
+# ── live server settings (MLX engine only) ───────────────────────────────────
+# MTPLX exposes a settings endpoint, so thinking can be changed on a running
+# server without reloading the model. llama.cpp has no equivalent - its
+# thinking is a per-request chat-template kwarg - so status.sh writes
+# env.conf there instead and asks for a restart.
+# ── live settings (no restart needed) ───────────────────────────────────────
+# MTPLX exposes POST /v1/mtplx/settings accepting reasoning, reasoning_effort,
+# enable_thinking, depth and more. This is what makes an on-the-fly toggle
+# possible: the model stays loaded and only the decode policy changes.
+live_settings_get() {
+  local hdr; hdr="$(auth_header)"
+  curl -fsS --max-time 8 ${hdr:+-H "$hdr"} "http://127.0.0.1:${PORT}/v1/mtplx/settings" 2>/dev/null
+}
+
+live_settings_set() {
+  local json="$1"
+  local hdr; hdr="$(auth_header)"
+  curl -fsS --max-time 10 -X POST     -H "Content-Type: application/json" ${hdr:+-H "$hdr"}     -d "$json" "http://127.0.0.1:${PORT}/v1/mtplx/settings" 2>/dev/null
+}
+
+# Map a THINKING level onto the live-settings payload.
+live_thinking_payload() {
+  local level="$1"
+  thinking_level_ok "$level" || die "Unknown thinking level: $level"
+  local effort; effort="$(thinking_effort_for "$level")"
+  if [[ "$level" == "off" ]]; then
+    printf '{"reasoning":"off","enable_thinking":false}'
+  else
+    printf '{"reasoning":"on","enable_thinking":true,"reasoning_effort":"%s"}' "$effort"
+  fi
+}
+
 # ── interactive prompts ──────────────────────────────────────────────────────
 # ask_yes_no <question> <default: y|n>
 #

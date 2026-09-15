@@ -11,27 +11,30 @@
 #  "Make it work, make it right, make it fast - then measure it, because
 #   the third one is only a claim until the numbers agree."
 # ─────────────────────────────────────────────────────────────────────────────
-# Stop the UpinelAIOS-GGUF endpoint.
+# Stop the UpinelAIOS endpoint - whichever engine is running.
 #
 #   ./stop.sh            graceful shutdown (recommended)
 #   ./stop.sh --force    SIGKILL - only if graceful stop hangs
 #
-# Graceful matters: a process holding a large wired model that is SIGKILLed can
-# leak wired pages at the kernel level until reboot. Prefer the graceful path.
+# Why graceful matters: a process holding a large wired model allocation that
+# is SIGKILLed can leak those wired pages at the kernel level until reboot.
+# Always prefer the graceful path. This applies to both engines - llama.cpp
+# and MTPLX both wire most of the model.
 
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/common.sh"
 load_config
 
 FORCE=0
 case "${1:-}" in
-  --force)   FORCE=1 ;;
-  -h|--help) show_usage "$0"; exit 0 ;;
-  "")        ;;
-  *)         die "Unknown argument: $1" ;;
+  --force)      FORCE=1 ;;
+  -h|--help)    show_usage "$0"; exit 0 ;;
+  "")           ;;
+  *)            die "Unknown argument: $1" ;;
 esac
 
 STOPPED=0
 
+# 1. The server we started ourselves.
 if pid_alive; then
   PID="$(cat "$PID_FILE")"
   if (( FORCE )); then
@@ -54,10 +57,15 @@ if pid_alive; then
   STOPPED=1
 fi
 
+# 2. Anything else holding the port - an MTPLX daemon started by hand or by
+#    the menu-bar app, or a llama-server someone launched themselves.
 for P in $(port_pids); do
   warn "Port $PORT is also held by pid $P (started outside this bundle)."
-  if (( FORCE )); then kill -9 "$P" 2>/dev/null || true
-  else kill -TERM "$P" 2>/dev/null || true; fi
+  if (( FORCE )); then
+    kill -9 "$P" 2>/dev/null || true
+  else
+    kill -TERM "$P" 2>/dev/null || true
+  fi
   ok "Signalled pid $P."
   STOPPED=1
 done
@@ -65,7 +73,11 @@ done
 if (( STOPPED == 0 )); then
   info "Nothing was running on port $PORT."
 else
+  # Give macOS a moment to release the wired GPU allocation.
   sleep 2
-  if server_healthy; then warn "Something still answers /health. Try ./stop.sh --force"
-  else ok "Port $PORT is free."; fi
+  if server_healthy; then
+    warn "Something is still answering /health. Try ./stop.sh --force"
+  else
+    ok "Port $PORT is free."
+  fi
 fi

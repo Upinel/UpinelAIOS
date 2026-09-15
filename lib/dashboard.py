@@ -72,7 +72,7 @@ HIDE_CURSOR, SHOW_CURSOR = "\033[?25l", "\033[?25h"
 # Window/tab title. OSC 0 sets icon + title, OSC 2 the window title; Terminal
 # and iTerm2 both honour them. Re-asserted every frame so nothing else can
 # claim the heading.
-WINDOW_TITLE = "UpinelAIOS-GGUF Status"
+WINDOW_TITLE = "UpinelAIOS Status"
 SET_TITLE = f"\033]0;{WINDOW_TITLE}\007\033]2;{WINDOW_TITLE}\007"
 CLEAR_TITLE = "\033]0;\007\033]2;\007"
 
@@ -1128,7 +1128,7 @@ class Dashboard:
         mm, ss = divmod(rem, 60)
 
         L = []
-        title = f"{BOLD}UpinelAIOS-GGUF{RESET}"
+        title = f"{BOLD}UpinelAIOS{RESET}"
         status = (f"{GREEN}\u25cf serving{RESET}" if s["server_up"]
                   else f"{RED}\u25cf not running{RESET}")
         clock = f"up {hh:02d}:{mm:02d}:{ss:02d}"
@@ -1573,8 +1573,10 @@ class Dashboard:
 # ── one-shot report (previously status.sh) ───────────────────────────────────
 def print_once(cfg, snap):
     s = snap
-    print(f"\n{BOLD}UpinelAIOS-GGUF{RESET} {DIM}- "
-          f"Upinel's One-Click AI Agent Server OS for Mac (GGUF){RESET}\n")
+    eng = cfg.get("engine", "gguf")
+    eng_label = {"gguf": "llama.cpp", "mlx": "MLX / MTPLX"}.get(eng, eng)
+    print(f"\n{BOLD}UpinelAIOS{RESET} {DIM}- "
+          f"One-Click AI Agent Server OS for Mac  ·  {eng_label}{RESET}\n")
 
     def line(label, value):
         print(f"  {label:<18} {value}")
@@ -1582,6 +1584,7 @@ def print_once(cfg, snap):
     print(f"{BOLD}Model{RESET}")
     line("name", cfg.get("model_repo", "?"))
     line("served as", cfg.get("served_name", "?"))
+    line("engine", {"gguf": "llama.cpp", "mlx": "MLX / MTPLX"}.get(cfg.get("engine", "gguf"), cfg.get("engine")))
     line("weights", cfg.get("main_gguf") or cfg.get("model_dir", "?"))
     line("vision", "on" if cfg.get("vision_gb") else "off")
 
@@ -1675,7 +1678,7 @@ def main():
         print(__doc__)
         return 0
 
-    cfg = json.loads(os.environ["LLAMA_DASH_CFG"])
+    cfg = json.loads(os.environ["AIOS_DASH_CFG"])
     dash = Dashboard(cfg, args)
 
     if args.once or args.json:
