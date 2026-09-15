@@ -50,7 +50,12 @@ engine_install() {
 
 # Depth is recorded per model rather than swept, so the GGUF depth sweep does
 # not apply here.
-engine_tunable() { return 1; }
+# MTPLX has a real --depth flag (1..3), and on this hardware the choice is
+# worth more than any other single MLX setting measured: on the 35B, depth 1
+# gave 121.8 t/s decode with 1708 t/s prefill, against 96.6 and 1678 at the
+# runtime's own default. It is also model-dependent - the 9B preferred depth 3
+# by a similar margin - which is precisely what a per-model sweep is for.
+engine_tunable() { return 0; }
 
 # MTPLX bootstraps a Python runtime on first use.
 
@@ -235,6 +240,12 @@ engine_apply_settings() {
     auto) ;;
     turbo|sustained|stable|exact|performance-cold|max-diagnostic) ;;
     *) die "PROFILE=\"$PROFILE\" is not one of auto | turbo | sustained | stable | exact | performance-cold | max-diagnostic" ;;
+  esac
+  # MTPLX rejects a depth above 3 by refusing to start, so catching it here
+  # turns a dead server with a log line into an error that names the setting.
+  case "${MTP_DEPTH:-auto}" in
+    auto|0|1|2|3) ;;
+    *) die "MTP_DEPTH=\"$MTP_DEPTH\" is not valid for MTPLX. Use auto, 0 (off), 1, 2 or 3 - the runtime refuses anything above 3." ;;
   esac
   case "$BATCHING_PRESET" in
     solo|latency|agent|throughput) ;;

@@ -41,9 +41,16 @@ require_bin python3 "python3 is required."
 # ── depth sweep ──────────────────────────────────────────────────────────────
 if [[ "$MODE" == "tune" ]]; then
   step "Sweeping speculative depth on this Mac"
-  [[ -n "$(model_draft_gguf "$MODEL_DIR" 2>/dev/null || true)" ]] \
-    || die "This model has no draft file, so there is nothing to tune."
-  log "Depth 0 = autoregressive. This loads the model 5 times."
+  # Engine-aware. This used to ask for a GGUF draft file, so it refused to tune
+  # any MLX model - while MLX is where depth turned out to matter most.
+  #
+  # The engine module has to be loaded first: engine_tunable and engine_name do
+  # not exist until it is, and this script only sources common.sh.
+  load_engine "$(model_engine_for "${MODEL_ALIAS:-$MODEL_REPO}" 2>/dev/null || echo gguf)" \
+    >/dev/null 2>&1 || true
+  engine_tunable \
+    || die "$(engine_name 2>/dev/null || echo "$MODEL_REPO") has no speculative depth to tune on this model."
+  log "Depth 0 = autoregressive. This loads the model once per depth."
   log ""
   ORIG_DEPTH="$MTP_DEPTH"
   BEST_DEPTH=""; BEST_TPS=0
@@ -62,10 +69,16 @@ PY
     "$REPO_DIR/stop.sh" >/dev/null 2>&1 || true
     "$REPO_DIR/start.sh" >/dev/null 2>&1 || true
     if ! server_healthy; then warn "depth $d: server did not start"; continue; fi
-    LINE="$(python3 "$REPO_DIR/bench/bench.py" --url "http://127.0.0.1:${PORT}" \
+    # Best of three, not one sample. Other things on this Mac steal GPU time and
+    # that only ever makes a run slower, so the best run is the closest estimate
+    # of what the depth can do - two identical control configs measured 80.6 and
+    # 69.6 by median but 85.5 and 83.6 by best.
+    TPS="$(python3 "$REPO_DIR/bench/bench.py" --url "http://127.0.0.1:${PORT}" \
       --model "$SERVED_MODEL_NAME" --api-key-file "$API_KEY_FILE" \
-      --contexts 8192 --max-tokens "$MAX_TOKENS" 2>/dev/null | grep 'context~' | head -1)"
-    TPS="$(printf '%s' "$LINE" | sed -n 's/.*decode= *\([0-9.]*\) t\/s.*/\1/p')"
+      --contexts 8192 --max-tokens "$MAX_TOKENS" --repeats 3 2>/dev/null \
+      | grep 'context~' \
+      | sed -n 's/.*decode= *\([0-9.]*\) t\/s.*/\1/p' \
+      | sort -rn | head -1)"
     printf '  depth %-2s  %s t/s\n' "$d" "${TPS:-?}"
     [[ -n "$TPS" ]] && awk -v a="$TPS" -v b="$BEST_TPS" 'BEGIN{exit !(a>b)}' \
       && { BEST_TPS="$TPS"; BEST_DEPTH="$d"; }
@@ -74,8 +87,13 @@ PY
   done
   printf '],"best_depth":%s,"best_tok_s":%s,"model_repo":"%s"}\n' \
     "${BEST_DEPTH:-1}" "${BEST_TPS:-0}" "$MODEL_REPO" >> "$OUT"
-  # Restore the original setting and restart on the winner.
-  python3 - "$ENV_FILE" "$BEST_DEPTH" <<'PY'
+  # Put MTP_DEPTH back exactly as it was, and let the per-model file carry
+  # the answer. Writing the winner here looks helpful and is not: MTP_DEPTH
+  # is one global setting, so tuning the GGUF model pinned its depth onto
+  # every model - including the MLX one this same sweep had just found
+  # wanted depth 1. effective_depth() only reads the tuning file while
+  # MTP_DEPTH is "auto".
+  python3 - "$ENV_FILE" "$ORIG_DEPTH" <<'PY'
 import re, sys
 path, depth = sys.argv[1], sys.argv[2]
 s = open(path).read()
@@ -84,7 +102,14 @@ open(path, "w").write(s)
 PY
   log ""
   ok "Winner: depth ${BEST_DEPTH} at ${BEST_TPS} t/s  (saved to $OUT)"
-  info "Restarting on the winner..."
+  if [[ "$ORIG_DEPTH" == "auto" ]]; then
+    info "MTP_DEPTH stays auto, so this model uses depth ${BEST_DEPTH} from the"
+    info "saved file and every other model keeps its own tuned value."
+  else
+    warn "MTP_DEPTH is pinned to \"$ORIG_DEPTH\" in env.conf, which overrides this."
+    warn "Set it to auto for the tuned depth to take effect."
+  fi
+  info "Restarting with the tuned depth..."
   "$REPO_DIR/restart.sh" >/dev/null 2>&1 || true
   exit 0
 fi

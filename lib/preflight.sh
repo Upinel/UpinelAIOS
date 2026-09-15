@@ -216,20 +216,28 @@ recommend_config() {
   fi
 
   # Context and KV quant together have to fit the memory budget.
+  #
+  # f16 KV above 24 GB, q8_0 below. Counterintuitive, and measured twice on
+  # both engines: leaving the cache unquantised is FASTER, not just more
+  # accurate. On gguf-g-26ba4b, f16 beat q8_0 by 19% decode at 8k and 43% at
+  # 32k; on mlx-q-35ba3b by 17%. The dequantisation cost per token outweighs
+  # the bandwidth the smaller cache saves. It costs about 1 GB at 128k for
+  # these models, because neither caches KV on every layer - cheap enough to
+  # take wherever there is room, and not worth risking on a 16 GB Mac.
   if (( ram >= 128 )); then
-    REC_CONTEXT=262144; REC_KV="q8_0"
+    REC_CONTEXT=262144; REC_KV="f16"
     REC_REASON_CTX="maximum context with an unquantized KV cache"
   elif (( ram >= 96 )); then
-    REC_CONTEXT=262144; REC_KV="q8_0"
-    REC_REASON_CTX="maximum context; q8 KV keeps it inside the budget"
+    REC_CONTEXT=262144; REC_KV="f16"
+    REC_REASON_CTX="maximum context; f16 KV still fits this much memory"
   elif (( ram >= 56 )); then
-    REC_CONTEXT=131072; REC_KV="q8_0"
+    REC_CONTEXT=131072; REC_KV="f16"
     REC_REASON_CTX="128K, with headroom left for your desktop apps"
   elif (( ram >= 40 )); then
-    REC_CONTEXT=65536; REC_KV="q8_0"
+    REC_CONTEXT=65536; REC_KV="f16"
     REC_REASON_CTX="64K; llama.cpp reserves the whole window up front, so this is a real cost"
   elif (( ram >= 30 )) ; then
-    REC_CONTEXT=32768; REC_KV="q8_0"
+    REC_CONTEXT=32768; REC_KV="f16"
     REC_REASON_CTX="32K is the reliable ceiling at ${ram} GB"
   elif (( ram >= 16 )) ; then
     REC_CONTEXT=16384; REC_KV="q8_0"

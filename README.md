@@ -87,6 +87,7 @@ Clone it, run `./install.sh`, run `./start.sh`. Nothing else.
   - [Chatting from the terminal](#chatting-from-the-terminal)
 - [Configure it](#configure-it)
   - [Two engines, one server](#two-engines-one-server)
+  - [What tuning actually bought](#what-tuning-actually-bought)
   - [Models: uncensored only](#models-uncensored-only)
     - [Gemma 4](#gemma-4)
     - [Qwen](#qwen)
@@ -284,18 +285,20 @@ and a new model cannot be added without declaring one:
 
 | alias | engine | model | decode | prefill |
 |---|---|---|---:|---:|
-| **`gguf-g-26ba4b`** | GGUF | Gemma 4 26B-A4B Q4_0 QAT — **the default** | **106.4 t/s** | 98 t/s |
+| **`gguf-g-26ba4b`** | GGUF | Gemma 4 26B-A4B Q4_0 QAT — **the default** | **~89 t/s** | ~1,390 t/s |
 | `gguf-g-e2b` | GGUF | Gemma 4 E2B — snappiest first token | 99.9 t/s | 294 t/s |
 | `gguf-g-12b` | GGUF | Gemma 4 12B — largest that fits a 16 GB Mac | 54.5 t/s | 81 t/s |
 | `gguf-g-31b` | GGUF | Gemma 4 31B heretic — highest quality dense | — | — |
 | `gguf-g-e4b` | GGUF | Gemma 4 E4B — only if `26ba4b` will not fit | 63.9 t/s | 84 t/s |
-| **`mlx-q-35ba3b`** | **MLX** | Qwen 3.6 35B-A3B MoE — **the MLX default** | **~98 t/s** | **~1,520 t/s** |
+| **`mlx-q-35ba3b`** | **MLX** | Qwen 3.6 35B-A3B MoE — **the MLX default** | **~141 t/s** | **~1,760 t/s** |
 | `mlx-q-27b-4bit` | MLX | Qwen 3.8 27B dense — the quality pick | ~30 t/s | ~330 t/s |
 | `mlx-q-9b` | MLX | Qwen 3.8 9B — only when memory is tight | ~90 t/s | ~1,390 t/s |
 | `gguf-q-27b` / `gguf-q-9b` / `gguf-q-35ba3b` | GGUF | the same Qwen models through llama.cpp | — | — |
 
-Measured on an M5 Pro. Old aliases (`26b-q4`, `moe`, `4bit`, …) still work, with
-a warning naming the replacement.
+Measured on an M5 Pro **at 8k context**, which is what an agent actually pays.
+Decode is higher at short context — `gguf-g-26ba4b` reaches ~104 t/s at 512
+tokens — and lower far out; at 32k it reads ~58 t/s. Old aliases (`26b-q4`,
+`moe`, `4bit`, …) still work, with a warning naming the replacement.
 
 > **Every MLX figure above was re-measured.** The tables used to report **32 t/s**
 > prefill for `mlx-q-35ba3b`, roughly 47× too low. That was a measurement
@@ -320,6 +323,58 @@ a warning naming the replacement.
 > The old numbers also overstated the engine gap: the best ratio measured
 > against llama.cpp on the same model is **2.2×** (the 27B), not the 2.6× these
 > docs used to claim. That claim is corrected throughout.
+
+### What tuning actually bought
+
+Measured on the two target models, before and after, at 8k context. Each figure
+is the best of several runs, engines interleaved so thermal drift hits every
+config equally.
+
+| | decode | prefill | TTFT |
+|---|---:|---:|---:|
+| `mlx-q-35ba3b` before | 88.8 t/s | 1,652 t/s | 4.87 s |
+| **`mlx-q-35ba3b` after** | **141.2 t/s** | **1,762 t/s** | **4.56 s** |
+| `gguf-g-26ba4b` before | 85.8 t/s | 1,360 t/s | 5.91 s |
+| **`gguf-g-26ba4b` after** | **89.0 t/s** | **1,388 t/s** | **5.79 s** |
+
+Two changes did that. **MTP depth is now tuned per model** rather than fixed at
+3 for everything: the 35B prefers depth 1 (worth 34% there), the Gemma prefers
+depth 2. `./bench/bench.sh --tune` runs the sweep and saves the winner per
+model; `./install.sh` runs it by default.
+
+**The KV cache defaults to `f16`, not `q8`.** That inverts the usual
+assumption: a smaller cache saves memory bandwidth but has to be dequantised on
+every token, and here the dequantisation costs more than the bandwidth saves.
+Leaving it unquantised measured faster on *both* engines:
+
+| | q8 | f16 |
+|---|---:|---:|
+| `gguf-g-26ba4b` at 8k | 78.2 t/s | **93.0 t/s** (+19%) |
+| `gguf-g-26ba4b` at 32k | 37.0 t/s | **52.9 t/s** (+43%) |
+| `mlx-q-35ba3b` at 8k | 91.2 t/s | **106.9 t/s** (+17%) |
+
+It costs about 1 GB at 128k for these models — see
+[bench/kv-from-gguf.py](bench/kv-from-gguf.py) for why that is so small — so
+`./install.sh` still picks `q8` on a 16 GB Mac.
+
+**The M5 Neural Accelerators were already on, and are worth having.** Forcing
+them off costs more than half the prefill:
+
+| | prefill | TTFT at 8k |
+|---|---:|---:|
+| tensor API on (auto, M5) | **1,153 t/s** | **6.98 s** |
+| tensor API off | 654 t/s | 12.30 s |
+
+Decode is unaffected, which is the shape you expect: it is a prefill win. Below
+M5 there is nothing to win and llama.cpp measures the same path as slightly
+slower, which is why the setting stays `auto` and the code never forces it on.
+
+> The numbers move a lot between runs — this is a working desktop, and other
+> apps steal GPU time. Individual configs measured up to 25% apart across
+> repeated loads. Everything above was compared within a single interleaved run,
+> best-of rather than median: two *identical* control configs scored 80.6 and
+> 69.6 by median but 85.5 and 83.6 by best, so best-of is what actually ranks
+> them. Treat differences under about 10% as unresolved.
 
 ### Models: uncensored only
 
