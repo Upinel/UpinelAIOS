@@ -64,6 +64,13 @@ if [[ -z "$MODEL_OVERRIDE" ]] && (( ! PRINT_ONLY )); then
   fi
 fi
 
+# Re-derive the alias from the repo that is actually being served. The picker
+# sets MODEL_REPO and MODEL_DIR but not MODEL_ALIAS, so without this the engine
+# below would be resolved from the alias left in MODEL - and picking an MLX
+# model while env.conf names a GGUF one would launch llama.cpp against an MTPLX
+# pack. Same class of bug as the installer installing the wrong runtime.
+MODEL_ALIAS="$(alias_for_repo "$MODEL_REPO")"
+
 MODEL_DIR="$MODELS_DIR/${MODEL_REPO//\//--}"
 export MODEL_REPO MODEL_DIR
 

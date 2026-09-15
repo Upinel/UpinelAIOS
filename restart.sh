@@ -105,19 +105,28 @@ fi
 # load the other one, which is the exact confusion this banner exists to stop.
 if (( PICKED )); then
   MODEL_REPO_R="$MODEL_REPO"
-  MODEL_ALIAS_R="$MODEL_ALIAS"
 else
   MODEL_REPO_R="$(model_repo_for "$MODEL")"
-  MODEL_ALIAS_R="$(alias_for_repo "$MODEL_REPO_R")"
 fi
+# Derived from the repo in both cases. choose_model_on_disk() sets MODEL_REPO
+# and MODEL_DIR but knows nothing about aliases, so reading $MODEL_ALIAS here
+# after an interactive pick died with "unbound variable" - and under set -u,
+# which lib/common.sh turns on for every script, that is fatal.
+MODEL_ALIAS_R="$(alias_for_repo "$MODEL_REPO_R")"
 ENGINE_R="$(model_engine_for "${MODEL_ALIAS_R:-$MODEL_REPO_R}")"
 [[ -n "$ENGINE_R" ]] || ENGINE_R="$(engine_for_dir "$MODELS_DIR/${MODEL_REPO_R//\//--}")"
 [[ -n "$ENGINE_R" ]] || ENGINE_R="gguf"
-EFFECTIVE_DEPTH="$(load_engine "$ENGINE_R" >/dev/null 2>&1; effective_depth)"
+# Load the engine for real, not inside a command substitution. A subshell load
+# defines its functions only for that subshell, so engine_name() and
+# engine_resolved_profile() were undefined by the time the banner called them -
+# which is how the profile line came to print an empty string and a
+# "command not found" to stderr.
+load_engine "$ENGINE_R" >/dev/null 2>&1 || true
+EFFECTIVE_DEPTH="$(effective_depth 2>/dev/null || echo 3)"
 
 log ""
 log "  ${C_BOLD}Starting with:${C_RESET}"
-log "    engine     $(load_engine "$ENGINE_R" >/dev/null 2>&1; engine_name)"
+log "    engine     $(engine_name 2>/dev/null || echo "$ENGINE_R")"
 log "    model      $MODEL_REPO_R${MODEL_ALIAS_R:+   ($MODEL_ALIAS_R)}"
 log "    served as  $SERVED_MODEL_NAME"
 log "    context    $CONTEXT_WINDOW   KV $(kv_quant_for "$ENGINE_R")"

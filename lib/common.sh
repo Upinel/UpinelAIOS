@@ -552,9 +552,19 @@ choose_model_on_disk() {
     esac
     mark=""
     (( i == default_idx )) && mark="${C_DIM}<- default${C_RESET}"
+    # A directory with no alias is one we do not ship: a model kept only as a
+    # companion source (the Gemma draft head lives in one), or something dropped
+    # in by hand. Printing its repo name in the ALIAS column made it look like a
+    # curated choice - and the row that came from the companion repo was the very
+    # build whose alias was deliberately removed for being 47% slower.
+    if [[ -z "$alias" ]]; then
+      note="${C_DIM}not one we ship${C_RESET}"
+      mark="${mark}${mark:+   }${note}"
+    fi
     # tr, not ${eng^^}: bash 3.2 ships on macOS and has no case conversion.
+    # %.20s truncates, so a long repo name cannot push the columns apart.
     engup="$(printf '%s' "$eng" | tr '[:lower:]' '[:upper:]')"
-    printf '  %2d  %s%-5s%s %-20s %4s GB  %s\n' \
+    printf '  %2d  %s%-5s%s %-20.20s %4s GB  %s\n' \
       "$i" "$engc" "$engup" "$C_RESET" "$name" "$size" "$mark"
     i=$(( i + 1 ))
   done

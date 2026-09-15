@@ -21,6 +21,11 @@
 # what the installer offers at a given memory size). So they are safe to run
 # after any edit, and this is what CI would run if there were CI.
 #
+# One suite - verify-restart-flow.py - drives ./start.sh and ./restart.sh through
+# a pty to reach the model picker. It kills them as soon as the banner is out,
+# before anything is stopped or loaded, so a server you already have running is
+# left alone (checked: same pid, still answering).
+#
 # NOT in here: verify-tools.py. It talks to a live endpoint and is a
 # diagnostic, not a regression suite - run it via ./bench/verify-tools.sh with
 # the server up. Including it would make this script fail on every machine
@@ -43,6 +48,7 @@ bench/verify-dashboard-reload.py
 bench/verify-kv-table.py
 bench/verify-chip-tier.py
 bench/verify-engine-contract.py
+bench/verify-restart-flow.py
 bench/verify-model-picker.py
 bench/verify-quant-select.py
 bench/verify-draft-select.py
