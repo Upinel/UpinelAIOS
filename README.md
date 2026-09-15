@@ -334,19 +334,19 @@ row marked with a verdict for *your* memory:
 ```
   Pick a model   this Mac has 64 GB of unified memory
 
-    #  ALIAS           SIZE   VERDICT              NOTE
-  ---  -------------- ------ -------------------- ------------------------------------
-    1  gguf-g-26ba4b   15 GB  RECOMMENDED          uncensored MoE, 3B active - the fastest 26B here
-    2  gguf-g-12b       8 GB  fits comfortably     dense 12B - smaller and less capable, still quick
-    3  gguf-g-31b      20 GB  fits comfortably     dense 31B abliterated - the highest quality, and the slowest
+    #  ALIAS             SIZE   VERDICT              NOTE
+  ---  ----------------- ------ -------------------- ------------------------------
+    1  gguf-g-26ba4b     15 GB  RECOMMENDED          uncensored MoE, 3B active - the fastest 26B here
+    2  gguf-g-12b        8 GB   fits comfortably     dense 12B - smaller and less capable, still quick
+    3  gguf-g-31b        20 GB  fits comfortably     dense 31B abliterated - the highest quality
     ...
-    6  gguf-q-27b      19 GB  fits comfortably     dense 27B, ~13.5 t/s; its MTP head needs a build step
-    7  gguf-q-9b        6 GB  fits comfortably     dense 9B, ~44 t/s - the MLX build is about twice this
+    6  gguf-q-27b        19 GB  fits comfortably     dense 27B, ~13.5 t/s; its MTP head needs a build step
+    7  gguf-q-9b         6 GB   fits comfortably     dense 9B, ~44 t/s - the MLX build is about twice this
     ...
-    9  mlx-q-35ba3b    22 GB  fits comfortably     35B MoE, ~3B active - fastest Qwen here (~98 t/s)
-   10  mlx-q-27b-4bit  19 GB  fits comfortably     dense 27B 4-bit - the quality pick (~30 t/s)
+    9  mlx-q-35ba3b      22 GB  fits comfortably     35B MoE, ~3B active - fastest Qwen here (~98 t/s)
+   10  mlx-q-27b-4bit    19 GB  fits comfortably     dense 27B 4-bit - the quality pick (~30 t/s)
     ...
-   14  mlx-q-9b         6 GB  fits comfortably     dense 9B (~90 t/s) - only when memory is tight
+   14  mlx-q-9b          6 GB   fits comfortably     dense 9B (~90 t/s) - only when memory is tight
   Model number:
 ```
 

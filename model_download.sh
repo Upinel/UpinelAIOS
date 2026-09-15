@@ -100,8 +100,8 @@ disk_usage()    { du -shL "$MODELS_DIR/${1//\//--}" 2>/dev/null | awk '{print $1
 
 list_models() {
   step "Known uncensored models"
-  printf '  %-5s %-12s %-8s %-12s %s\n' "ENG" "ALIAS" "SIZE" "ON DISK" "REPO"
-  printf '  %-5s %-12s %-8s %-12s %s\n' "-----" "------------" "--------" "------------" "------------------------------------------"
+  printf '  %-5s %-17s %-8s %-12s %s\n' "ENG" "ALIAS" "SIZE" "ON DISK" "REPO"
+  printf '  %-5s %-17s %-8s %-12s %s\n' "-----" "-----------------" "--------" "------------" "------------------------------------------"
   for alias in $MODEL_ALIASES; do
     repo="$(model_repo_for "$alias")"
     if model_on_disk "$repo"; then
@@ -118,7 +118,7 @@ list_models() {
       *)    engc="$C_DIM"    ;;
     esac
     engup="$(printf '%s' "$eng" | tr '[:lower:]' '[:upper:]')"
-    printf "  %b%-5s%b %-12s %-8s %-12b %s%b\n" \
+    printf "  %b%-5s%b %-17s %-8s %-12b %s%b\n" \
       "$engc" "$engup" "$C_RESET" "$alias" "$(size_hint "$repo")" "$state" "$repo" "$marker"
   done
   log ""

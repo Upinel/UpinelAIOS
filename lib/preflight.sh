@@ -451,8 +451,8 @@ print_model_menu() {
   log ""
   log "  ${C_BOLD}Pick a model${C_RESET}   ${C_DIM}this Mac has ${HW_RAM_GB} GB of unified memory${C_RESET}"
   log ""
-  printf '  %3s  %-12s %-6s %-20s %s\n' "#" "ALIAS" "SIZE" "VERDICT" "NOTE"
-  printf '  %3s  %-12s %-6s %-20s %s\n' "---" "------------" "------" "--------------------" "----------------------------------------"
+  printf '  %3s  %-17s %-6s %-20s %s\n' "#" "ALIAS" "SIZE" "VERDICT" "NOTE"
+  printf '  %3s  %-17s %-6s %-20s %s\n' "---" "-----------------" "------" "--------------------" "----------------------------------------"
 
   local i=1 alias fit need verdict note colour
   MODEL_MENU_ALIASES=""
@@ -467,7 +467,7 @@ print_model_menu() {
       will\ not\ fit)    colour="$C_RED"    ;;
       *)                  colour="$C_DIM"    ;;
     esac
-    printf '  %3d  %-12s %-6s %s%-20s%s %s%s%s\n' \
+    printf '  %3d  %-17s %-6s %s%-20s%s %s%s%s\n' \
       "$i" "$alias" "$(model_size_gb "$(model_repo_for "$alias" 2>/dev/null)") GB" \
       "$colour" "$verdict" "$C_RESET" "$C_DIM" "$note" "$C_RESET"
     MODEL_MENU_ALIASES="$MODEL_MENU_ALIASES $alias"
