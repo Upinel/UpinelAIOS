@@ -57,20 +57,26 @@ show_usage() {
 }
 
 # ── model registry ───────────────────────────────────────────────────────────
-# GEMMA 4, UNCENSORED ONLY.
+# TWO ENGINES, ONE REGISTRY. UNCENSORED ONLY.
 #
-# Every entry is an uncensored Gemma 4 fine-tune served as GGUF by llama.cpp.
-# That is not a preference, it is the only combination that works: MTPLX drives
-# Gemma 4 through a target/assistant pair and the only pair in existence is
-# built from Google's aligned models, so an uncensored Gemma 4 cannot run there
-# at all.
+# UpinelAIOS serves through either of two runtimes, and the alias tells you
+# which. The engine is a property of the model, not a global setting: a GGUF
+# checkpoint can only run on llama.cpp, an MTPLX pack can only run on MTPLX, so
+# picking the model picks the engine and there is nothing else to decide.
 #
+#   engine   runtime          what it is best at
+#   ------   ---------------  ------------------------------------------------
+#   gguf     llama.cpp        Gemma 4 at peak speed; vision; 100+ t/s
+#   mlx      MLX / MTPLX      anything Qwen - up to 2.6x faster than llama.cpp
+#
+# ── GGUF (llama.cpp) ─────────────────────────────────────────────────────────
 #   26b-q4       MoE, Q4_0 QAT. FASTEST 26B - default. See below.
-#   26b-a4b      the same MoE in Q4_K_M. ~22% slower, kept for comparison.
-#   12b          dense 12B
-#   31b-heretic  dense 31B, abliterated. Highest quality.
+#   26b-a4b      the same MoE in Q4_K_M. ~47% slower, kept for comparison.
+#   12b          dense 12B, the largest that fits a 16 GB Mac
+#   31b-heretic  dense 31B, abliterated. Highest quality dense model.
 #   e4b          middle size - measured slower than both the 26B MoE and E2B
-#   e2b          smallest and FITS an 8 GB Mac.
+#   e2b          smallest and FITS an 8 GB Mac
+#   qwen-27b / qwen-9b / qwen-35b   Qwen through llama.cpp - see the MLX note
 #
 # Why 26b-q4 is the default: llama.cpp's Metal kernels run Q4_0 markedly
 # faster than K-quants, and Google's QAT release makes Q4_0 quality-safe
@@ -84,7 +90,43 @@ show_usage() {
 #
 # ~47% faster decode and 15% smaller. The existing MTP drafter works with it
 # unchanged, at slightly HIGHER acceptance than on Q4_K_M.
-MODEL_ALIASES="26b-q4 26b-a4b 12b 31b-heretic e4b e2b qwen-27b qwen-9b qwen-35b"
+#
+# ── MLX (MTPLX) ──────────────────────────────────────────────────────────────
+#   4bit        27B dense, 4-bit. The quality pick.
+#   6bit        27B dense, 6-bit. Closer to the original weights.
+#   27b-3bit    the smallest 27B pack
+#   27b-4bit    a different 27B 4-bit conversion
+#   9b          dense 9B, for tight memory
+#   9b is the MLX default only on a small Mac.
+#   moe         35B-A3B MoE. DEFAULT - fastest thing here, and the best agent
+#               balance. Note this is Qwen 3.6, not 3.8: Qwen never released a
+#               3.8 35B-A3B, and the one repo labelled that way is a 3.6 distill.
+#
+# The two families are NOT interchangeable on speed. A dense 27B reads ~15 GB of
+# weights per token through llama.cpp and manages ~13.5 t/s; the same model
+# through MLX reaches ~34.7 t/s, because MTPLX's MTP implementation works on
+# Metal and llama.cpp's does not. The MLX aliases exist to collect that.
+#
+# NOTE: a case statement, not an associative array. macOS ships bash 3.2,
+# which has no `declare -A`, and this bundle must run on a stock Mac.
+MODEL_ALIASES="26b-q4 26b-a4b 12b 31b-heretic e4b e2b qwen-27b qwen-9b qwen-35b 4bit 6bit 27b-3bit 27b-4bit 9b moe"
+
+# Which engine serves this alias: gguf | mlx. Empty when unknown.
+#
+# A raw owner/name repo id is inferred from its name, because that is all we
+# have - MTPLX packs say MTPLX, GGUF files say GGUF. An unrecognisable repo id
+# returns empty and the caller decides what to do about it.
+model_engine_for() {
+  case "$1" in
+    # ── llama.cpp ──
+    26b-q4|26b-a4b|12b|31b-heretic|e4b|e2b|qwen-27b|qwen-9b|qwen-35b) echo gguf ;;
+    # ── MLX / MTPLX ──
+    4bit|6bit|27b-3bit|27b-4bit|9b|moe)                              echo mlx  ;;
+    *MTPLX*|*mtplx*|*-4bit|*-6bit)                                   echo mlx  ;;
+    *GGUF*|*gguf*)                                                   echo gguf ;;
+    *)                                                               echo ""   ;;
+  esac
+}
 
 model_repo_for() {
   case "$1" in
@@ -94,6 +136,13 @@ model_repo_for() {
     31b-heretic) echo "llmfan46/gemma-4-31B-it-uncensored-heretic-GGUF" ;;
     e4b)         echo "HauhauCS/Gemma-4-E4B-Uncensored-HauhauCS-Aggressive" ;;
     e2b)         echo "HauhauCS/Gemma-4-E2B-Uncensored-HauhauCS-Aggressive" ;;
+    # ── MLX / MTPLX ──────────────────────────────────────────────────────────
+    4bit)        echo "itrejomx/Qwen3.8-27B-Uncensored-HauhauCS-Aggressive-MTPLX-4bit" ;;
+    6bit)        echo "itrejomx/Qwen3.8-27B-Uncensored-HauhauCS-Aggressive-MTPLX-6bit" ;;
+    27b-3bit)    echo "barozp/Qwen3.8-27B-Uncensored-MTPLX-3bit" ;;
+    27b-4bit)    echo "barozp/Qwen3.8-27B-Uncensored-MTPLX-4bit" ;;
+    9b)          echo "Foresee/Qwen3.8-9B-heretic-uncensored-4bit-MTPLX" ;;
+    moe)         echo "hawhyhb/Qwen3.6-35B-A3B-Uncensored-Heretic-MTPLX-4bit-FP16" ;;
     # ── Qwen ─────────────────────────────────────────────────────────────────
     # Same rule as the Gemma side: uncensored only. Qwen3.8 is served through
     # llama.cpp like everything else here, so the family is just another set of
@@ -450,6 +499,92 @@ model_draft_gguf() {
   # head" is a normal answer, not a failure - returning 1 here aborted
   # start.sh outright for every model without one.
   return 0
+}
+
+# ── MLX engine helpers ───────────────────────────────────────────────────────
+# Used by lib/engines/mlx.sh. They live here rather than in the engine module
+# because the shared front end also needs them: the model picker, model_fit()
+# and the installer all have to judge an MLX pack.
+#
+# An MLX pack is a tree of safetensors shards, not a single file, so "is this
+# downloaded?" cannot be answered by looking for one filename.
+
+# Size of one model directory in GB, from the safetensors it holds. Returns
+# non-zero when the weights come to less than a gigabyte, which in practice
+# means the download did not finish.
+model_dir_gb() {
+  local bytes
+  bytes="$(find "$1" -name '*.safetensors' -type f \
+            -exec stat -f%z {} + 2>/dev/null | awk '{n+=$1} END {print n+0}')"
+  (( bytes > 1000000000 )) || return 1
+  echo $(( bytes / 1000000000 ))
+}
+
+# Is this directory a model that will actually load?
+#
+# Not "does it contain a safetensors file": a download in progress leaves a
+# directory with the first shards in it, and offering that in the picker
+# produces exactly the failure the picker exists to prevent. Packs ship
+# model.safetensors.index.json naming every shard, so when that index is there,
+# all of it has to be there.
+model_dir_ok() {
+  local dir="$1"
+  [[ -d "$dir" ]] || return 1
+  find "$dir" -maxdepth 1 -name '*.safetensors' -type f 2>/dev/null \
+    | grep -q . || return 1
+  [[ -f "$dir/model.safetensors.index.json" ]] || return 0
+  python3 - "$dir" <<'PYEOF'
+import json, os, sys
+d = sys.argv[1]
+try:
+    weight_map = json.load(open(os.path.join(d, "model.safetensors.index.json")))
+except Exception:
+    sys.exit(0)          # an unreadable index is not grounds to hide a model
+want = set((weight_map.get("weight_map") or {}).values())
+if not want:
+    sys.exit(0)
+sys.exit(0 if all(os.path.exists(os.path.join(d, f)) for f in want) else 1)
+PYEOF
+}
+
+# MLX takes thinking as flags rather than a template kwarg, so it needs its own
+# mapping from the project's five levels onto MTPLX's three efforts.
+thinking_effort_for() {
+  case "$1" in
+    high)   echo xhigh  ;;
+    medium) echo medium ;;
+    *)      echo low    ;;
+  esac
+}
+
+thinking_flags() {
+  thinking_level_ok "$THINKING" || die "THINKING=\"$THINKING\" is not one of off | minimal | low | medium | high"
+  if [[ "$THINKING" == "off" ]]; then
+    echo "--reasoning off"
+  else
+    echo "--reasoning on --reasoning-effort $(thinking_effort_for "$THINKING")"
+  fi
+}
+
+# MTPLX's thinking guard applies to requests carrying tools - exactly the agent
+# case - and it is off by default. This is what turns "think briefly" into a
+# limit rather than a suggestion.
+apply_thinking_budget_env() {
+  local budget="$THINKING_BUDGET_TOKENS"
+  [[ "$budget" == "0" ]] && budget="$(thinking_budget_for "$THINKING")"
+  if [[ "$THINKING" == "off" ]]; then
+    unset MTPLX_THINKING_BUDGET MTPLX_THINKING_NOVELTY_CLOSE
+    return 0
+  fi
+  if (( budget > 0 )); then
+    export MTPLX_THINKING_BUDGET="$budget"
+    # End thinking early once it stops producing new content, so a capped run
+    # does not merely truncate mid-thought.
+    export MTPLX_THINKING_NOVELTY_CLOSE="${THINKING_NOVELTY_CLOSE:-1}"
+  else
+    unset MTPLX_THINKING_BUDGET
+    export MTPLX_THINKING_NOVELTY_CLOSE="${THINKING_NOVELTY_CLOSE:-1}"
+  fi
 }
 
 model_present() {
