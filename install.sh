@@ -88,69 +88,147 @@ fi
 #
 # Skipped when the model was named explicitly, when --yes was given, or when
 # there is no terminal to ask on.
+# One row of the engine menu. A function so the menus below - both engines,
+# one engine - cannot drift apart in alignment.
+#
+# The format string is double-quoted on purpose: single quotes would make
+# printf print the literal text ${C_BOLD} instead of switching the colour.
+menu_row() {
+  if [[ -n "$4" ]]; then
+    printf "  %s%s%s  %-5s %-20s %4s GB   %s\n" \
+      "$C_BOLD" "$1" "$C_RESET" "$2" "$3" "$4" "$5"
+  else
+    printf "  %s%s%s  %-5s %-20s %8s   %s\n" \
+      "$C_BOLD" "$1" "$C_RESET" "$2" "$3" "" "$5"
+  fi
+}
+
+read_pick() {
+  PICK=""
+  if [[ -t 0 ]]; then read -r PICK || PICK=""; else read -r PICK < /dev/tty || PICK=""; fi
+}
+
+# Any owner/name repo. Sets MODEL and ENGINE_FORCED; returns non-zero when the
+# id is unusable, so the caller can fall back to what it already suggested.
+ask_custom_model() {
+  local custom custom_engine
+  log ""
+  printf "  Hugging Face repo id (owner/name): "
+  if [[ -t 0 ]]; then read -r custom || custom=""; else read -r custom < /dev/tty || custom=""; fi
+  custom="${custom#https://huggingface.co/}"; custom="${custom%/}"
+  if [[ "$custom" != */* ]]; then
+    warn "That is not an owner/name repo id."
+    return 1
+  fi
+  # The engine is read off the name, and asked for only when the name does not
+  # say - so a custom model works on either engine without the user needing to
+  # know the rule.
+  custom_engine="$(model_engine_for "$custom")"
+  if [[ -z "$custom_engine" ]]; then
+    printf "  Is it a GGUF repo or an MTPLX pack? [gguf/mlx] "
+    if [[ -t 0 ]]; then read -r custom_engine || custom_engine=""; else read -r custom_engine < /dev/tty || custom_engine=""; fi
+    case "$custom_engine" in
+      mlx|MLX) custom_engine=mlx ;;
+      *)       custom_engine=gguf ;;
+    esac
+  fi
+  MODEL="$custom"
+  ENGINE_FORCED="$custom_engine"
+  info "Custom $(printf '%s' "$custom_engine" | tr '[:lower:]' '[:upper:]'): $custom"
+  return 0
+}
+
 DO_BOTH=0
 ENGINE_FORCED=""
 if [[ -z "$MODEL_OVERRIDE" ]] && (( DO_SCAN )) && (( ! ASSUME_YES )); then
   recommend_engines
-  if [[ -n "$REC_GGUF_ALIAS" && -n "$REC_MLX_ALIAS" ]]; then
-    step "Which engine?"
-    log ""
-    printf '  ${C_BOLD}%s${C_RESET}  %-5s %-20s %5s GB   %s\n' \
-      "1" "GGUF" "$REC_GGUF_ALIAS" "$REC_GGUF_WEIGHTS" "$REC_GGUF_NOTE"
-    printf '  ${C_BOLD}%s${C_RESET}  %-5s %-20s %5s GB   %s\n' \
-      "2" "MLX"  "$REC_MLX_ALIAS"  "$REC_MLX_WEIGHTS"  "$REC_MLX_NOTE"
-    printf '  ${C_BOLD}%s${C_RESET}  %-5s %-20s %5s GB   %s\n' \
-      "3" "both" "install both engines and both models" "" ""
-    printf '  ${C_BOLD}%s${C_RESET}  %-5s %-20s %5s GB   %s\n' \
-      "4" "your" "your own Hugging Face repo" "" "any uncensored owner/name"
-    log ""
-    log "  ${C_DIM}1 is the fastest decode measured here (106 t/s). 2 is the best"
-    log "  agent balance for Qwen, and up to 2.6x llama.cpp on the same model."
-    log "  3 costs about $((${REC_GGUF_WEIGHTS} + ${REC_MLX_WEIGHTS})) GB of disk.${C_RESET}"
-    log ""
 
-    printf '  Choose [1/2/3/4]: '
-    PICK=""
-    if [[ -t 0 ]]; then read -r PICK || PICK=""; else read -r PICK < /dev/tty || PICK=""; fi
-    case "${PICK:-1}" in
-      2) MODEL="$(model_repo_for "$REC_MLX_ALIAS")"
-         info "MLX: $REC_MLX_ALIAS" ;;
-      3) DO_BOTH=1
-         MODEL="$(model_repo_for "$REC_GGUF_ALIAS")"
-         info "Both engines, starting with GGUF: $REC_GGUF_ALIAS" ;;
-      4)
-        # A repo we do not ship. The engine is inferred from the name, and
-        # asked for only when the name does not say - so this works for both
-        # engines without the user needing to know the rule.
-        log ""
-        printf '  Hugging Face repo id (owner/name): '
-        CUSTOM=""
-        if [[ -t 0 ]]; then read -r CUSTOM || CUSTOM=""; else read -r CUSTOM < /dev/tty || CUSTOM=""; fi
-        CUSTOM="${CUSTOM#"https://huggingface.co/"}"; CUSTOM="${CUSTOM%/}"
-        if [[ "$CUSTOM" != */* ]]; then
-          warn "That is not an owner/name repo id. Using the GGUF suggestion."
-          MODEL="$(model_repo_for "$REC_GGUF_ALIAS")"
-        else
-          CUSTOM_ENGINE="$(model_engine_for "$CUSTOM")"
-          if [[ -z "$CUSTOM_ENGINE" ]]; then
-            printf '  Is it a GGUF repo or an MTPLX pack? [gguf/mlx] '
-            if [[ -t 0 ]]; then read -r CUSTOM_ENGINE || CUSTOM_ENGINE=""; else read -r CUSTOM_ENGINE < /dev/tty || CUSTOM_ENGINE=""; fi
-            case "$CUSTOM_ENGINE" in
-              mlx|MLX) CUSTOM_ENGINE=mlx ;;
-              *)       CUSTOM_ENGINE=gguf ;;
-            esac
-          fi
-          MODEL="$CUSTOM"
-          ENGINE_FORCED="$CUSTOM_ENGINE"
-          info "Custom $(printf '%s' "$CUSTOM_ENGINE" | tr '[:lower:]' '[:upper:]'): $CUSTOM"
-        fi
-        ;;
-      *) MODEL="$(model_repo_for "$REC_GGUF_ALIAS")"
-         info "GGUF: $REC_GGUF_ALIAS" ;;
-    esac
-    set_config_value MODEL "$MODEL"
+  if (( ${REC_ALL_TOO_BIG:-0} )); then
+    warn "No model in this bundle fits ${HW_RAM_GB} GB of unified memory."
+    warn "The smallest of each engine is shown; expect paging and expect it to be slow."
     log ""
   fi
+
+  case "$REC_SUGGEST" in
+    both)
+      step "Which engine?"
+      log ""
+      menu_row 1 GGUF "$REC_GGUF_ALIAS" "$REC_GGUF_WEIGHTS" "$REC_GGUF_NOTE"
+      menu_row 2 MLX  "$REC_MLX_ALIAS"  "$REC_MLX_WEIGHTS"  "$REC_MLX_NOTE"
+      menu_row 3 both "install both engines and both models" "" ""
+      menu_row 4 your "your own Hugging Face repo" "" "any uncensored owner/name"
+      # "fits" and "only just fits" are different promises, and this menu is
+      # where the choice is made - so the verdict belongs here too, not only in
+      # the scan table above.
+      if [[ "$REC_GGUF_VERDICT" == tight* ]]; then
+        warn "$REC_GGUF_ALIAS only just fits ${HW_RAM_GB} GB - it will page under load."
+      fi
+      if [[ "$REC_MLX_VERDICT" == tight* ]]; then
+        warn "$REC_MLX_ALIAS only just fits ${HW_RAM_GB} GB - it will page under load."
+      fi
+      log ""
+      log "  ${C_DIM}1 is the fastest decode measured here (106 t/s). 2 is the best"
+      log "  agent balance for Qwen, and up to 2.6x llama.cpp on the same model."
+      log "  3 costs about $((${REC_GGUF_WEIGHTS} + ${REC_MLX_WEIGHTS})) GB of disk.${C_RESET}"
+      log ""
+
+      printf "  Choose [1/2/3/4]: "
+      read_pick
+      case "${PICK:-1}" in
+        2) MODEL="$(model_repo_for "$REC_MLX_ALIAS")"
+           info "MLX: $REC_MLX_ALIAS" ;;
+        3) DO_BOTH=1
+           MODEL="$(model_repo_for "$REC_GGUF_ALIAS")"
+           info "Both engines, starting with GGUF: $REC_GGUF_ALIAS" ;;
+        4) if ! ask_custom_model; then
+             MODEL="$(model_repo_for "$REC_GGUF_ALIAS")"
+             info "GGUF: $REC_GGUF_ALIAS"
+           fi ;;
+        *) MODEL="$(model_repo_for "$REC_GGUF_ALIAS")"
+           info "GGUF: $REC_GGUF_ALIAS" ;;
+      esac
+      ;;
+
+    gguf|mlx)
+      # Only one engine has a model this Mac can load, so there is only one
+      # suggestion to make. The other engine is explained rather than listed:
+      # a suggestion that will not fit is not a choice, it is a trap.
+      if [[ "$REC_SUGGEST" == "gguf" ]]; then
+        S_ENGINE=GGUF; S_ALIAS="$REC_GGUF_ALIAS"; S_GB="$REC_GGUF_WEIGHTS"
+        S_NOTE="$REC_GGUF_NOTE"; S_VERDICT="$REC_GGUF_VERDICT"
+        M_NAME="$REC_MLX_MINNAME"; M_NEED="$REC_MLX_MINNEED"; M_ENGINE="MLX"
+      else
+        S_ENGINE=MLX; S_ALIAS="$REC_MLX_ALIAS"; S_GB="$REC_MLX_WEIGHTS"
+        S_NOTE="$REC_MLX_NOTE"; S_VERDICT="$REC_MLX_VERDICT"
+        M_NAME="$REC_GGUF_MINNAME"; M_NEED="$REC_GGUF_MINNEED"; M_ENGINE="GGUF"
+      fi
+
+      step "Suggested model"
+      log ""
+      menu_row 1 "$S_ENGINE" "$S_ALIAS" "$S_GB" "$S_NOTE"
+      menu_row 2 your "your own Hugging Face repo" "" "any uncensored owner/name"
+      log ""
+      log "  ${C_DIM}No ${M_ENGINE} model is offered: the smallest one, ${M_NAME},"
+      log "  needs about ${M_NEED} GB and this Mac has ${HW_RAM_GB} GB.${C_RESET}"
+      if [[ "$S_VERDICT" == tight* ]]; then
+        warn "This one only just fits - it will page under load."
+      fi
+      log ""
+
+      printf "  Choose [1/2]: "
+      read_pick
+      case "${PICK:-1}" in
+        2) if ! ask_custom_model; then
+             MODEL="$(model_repo_for "$S_ALIAS")"
+             info "$S_ENGINE: $S_ALIAS"
+           fi ;;
+        *) MODEL="$(model_repo_for "$S_ALIAS")"
+           info "$S_ENGINE: $S_ALIAS" ;;
+      esac
+      ;;
+  esac
+  set_config_value MODEL "$MODEL"
+  log ""
 fi
 
 # The engine choice above may have changed MODEL, so re-derive the repo and

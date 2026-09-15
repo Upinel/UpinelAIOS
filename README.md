@@ -234,7 +234,8 @@ to decide.
 | ![GGUF](https://img.shields.io/badge/GGUF-llama.cpp-F2B93B?style=flat-square) | llama.cpp | Gemma 4 at peak speed, plus vision | **106 t/s** |
 | ![MLX](https://img.shields.io/badge/MLX-MTPLX-B9A5FF?style=flat-square) | MLX / MTPLX | anything Qwen — up to **2.6×** llama.cpp on the same model | **79 t/s** |
 
-`./install.sh` recommends a model for **each** engine and lets you choose:
+`./install.sh` recommends one model from **each** engine — the fastest in that
+engine this Mac can actually load — and lets you choose:
 
 ```
   1  GGUF gguf-g-26ba4b     15 GB  uncensored MoE, 3B active - 106 t/s
@@ -245,6 +246,23 @@ to decide.
 
 Pick 3 and you get both runtimes and both models; each is served by whatever
 `./start.sh` or the `./model_download.sh` picker selects afterwards.
+
+An engine is only offered if something in it fits. On an 8 GB Mac the menu
+collapses to the single model that runs, and the other engine is explained
+rather than listed:
+
+```
+  1  GGUF  gguf-g-e2b              4 GB   smallest, and the fastest small model
+  2  your  your own Hugging Face repo            any uncensored owner/name
+
+  No MLX model is offered: the smallest one, mlx-q-9b,
+  needs about 9 GB and this Mac has 8 GB.
+```
+
+Offering a model that cannot load is not a choice. Suggested sizes are the
+model plus its KV cache at the recommended context plus 3 GB of runtime
+headroom, so "fits" means it fits with something left over, not merely that it
+starts.
 
 Pick 4 and you are asked for any `owner/name` repo. The engine is read off the
 name (`…-GGUF` is llama.cpp, `…-MTPLX…` is MLX) and asked for only when the name

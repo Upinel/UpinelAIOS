@@ -92,39 +92,86 @@ print_hardware() {
 # Both are judged with model_fit(), so the same memory arithmetic decides both
 # and neither can recommend something this Mac cannot load.
 #
-# Sets: REC_GGUF_ALIAS/_REPO/_WEIGHTS/_NOTE and the MLX equivalents.
-recommend_engines() {
-  local ram="$HW_RAM_GB" cand fit verdict
+# Sets: REC_GGUF_ALIAS/_REPO/_WEIGHTS/_NOTE and the MLX equivalents, plus
+# REC_SUGGEST, which says which engines actually produced a suggestion.
+#
+# An engine is dropped when nothing in its ladder fits this Mac. That is the
+# point of the ladder: it is walked for the best model that *runs*, not for
+# the best model, full stop. Falling back to the smallest entry regardless
+# would offer a 9 GB model to an 8 GB machine and call it a suggestion.
+_rec_walk() {
+  local ladder="$1" cand fit need verdict
+  local best_alias="" best_need="" best_verdict=""
+  local min_name="" min_need=""
 
-  # Preference order per engine, best first. The list is walked until one fits;
-  # the last entry is taken regardless, so there is always an answer.
+  for cand in $ladder; do
+    fit="$(model_fit "$cand")"
+    need="${fit%% *}"; verdict="${fit#* }"
+    [[ "$need" =~ ^[0-9]+$ ]] || continue
+
+    # Smallest thing on this ladder, for explaining an engine away.
+    if [[ -z "$min_need" ]] || (( need < min_need )); then
+      min_need="$need"; min_name="$cand"
+    fi
+
+    if [[ -z "$best_alias" && "$verdict" != "will not fit" ]]; then
+      best_alias="$cand"; best_need="$need"; best_verdict="$verdict"
+    fi
+  done
+
+  printf '%s|%s|%s|%s|%s\n' \
+    "$best_alias" "$best_need" "$best_verdict" "$min_name" "$min_need"
+}
+
+recommend_engines() {
+  local gguf_walk mlx_walk
+
+  # Preference order per engine, best first.
   local gguf_ladder="gguf-g-26ba4b gguf-g-12b gguf-g-e2b"
   local mlx_ladder="mlx-q-35ba3b mlx-q-27b-4bit mlx-q-9b"
 
-  REC_GGUF_ALIAS=""; REC_MLX_ALIAS=""
+  gguf_walk="$(_rec_walk "$gguf_ladder")"
+  mlx_walk="$(_rec_walk "$mlx_ladder")"
 
-  for cand in $gguf_ladder; do
-    fit="$(model_fit "$cand")"; verdict="${fit#* }"
-    if [[ "$verdict" != "will not fit" ]] || [[ "$cand" == "${gguf_ladder##* }" ]]; then
-      REC_GGUF_ALIAS="$cand"; REC_GGUF_NEED="${fit%% *}"; REC_GGUF_VERDICT="$verdict"
-      break
-    fi
-  done
+  IFS='|' read -r REC_GGUF_ALIAS REC_GGUF_NEED REC_GGUF_VERDICT \
+                REC_GGUF_MINNAME REC_GGUF_MINNEED <<< "$gguf_walk"
+  IFS='|' read -r REC_MLX_ALIAS  REC_MLX_NEED  REC_MLX_VERDICT  \
+                REC_MLX_MINNAME  REC_MLX_MINNEED  <<< "$mlx_walk"
 
-  for cand in $mlx_ladder; do
-    fit="$(model_fit "$cand")"; verdict="${fit#* }"
-    if [[ "$verdict" != "will not fit" ]] || [[ "$cand" == "${mlx_ladder##* }" ]]; then
-      REC_MLX_ALIAS="$cand"; REC_MLX_NEED="${fit%% *}"; REC_MLX_VERDICT="$verdict"
-      break
-    fi
-  done
+  if [[ -n "$REC_GGUF_ALIAS" && -n "$REC_MLX_ALIAS" ]]; then
+    REC_SUGGEST="both"
+  elif [[ -n "$REC_GGUF_ALIAS" ]]; then
+    REC_SUGGEST="gguf"
+  elif [[ -n "$REC_MLX_ALIAS" ]]; then
+    REC_SUGGEST="mlx"
+  else
+    # No Apple Silicon Mac ships with less than 8 GB, so this is close to
+    # unreachable - but "nothing fits" must still produce a usable install
+    # rather than an empty menu. Offer the smallest of each and say so.
+    REC_SUGGEST="both"
+    REC_ALL_TOO_BIG=1
+    REC_GGUF_ALIAS="$REC_GGUF_MINNAME"; REC_GGUF_NEED="$REC_GGUF_MINNEED"
+    REC_MLX_ALIAS="$REC_MLX_MINNAME";  REC_MLX_NEED="$REC_MLX_MINNEED"
+    REC_GGUF_VERDICT="will not fit"
+    REC_MLX_VERDICT="will not fit"
+  fi
 
-  REC_GGUF_REPO="$(model_repo_for "$REC_GGUF_ALIAS")"
-  REC_MLX_REPO="$(model_repo_for "$REC_MLX_ALIAS")"
-  REC_GGUF_WEIGHTS="$(model_size_gb "$REC_GGUF_REPO")"
-  REC_MLX_WEIGHTS="$(model_size_gb "$REC_MLX_REPO")"
-  REC_GGUF_NOTE="$(model_note "$REC_GGUF_ALIAS")"
-  REC_MLX_NOTE="$(model_note "$REC_MLX_ALIAS")"
+  # An engine that produced no suggestion is left entirely empty - including
+  # its repo, which must NOT be resolved: model_repo_for() rejects an empty id
+  # by dying, which would take the whole installer down with it.
+  REC_GGUF_REPO=""; REC_GGUF_WEIGHTS=0; REC_GGUF_NOTE=""
+  REC_MLX_REPO="";  REC_MLX_WEIGHTS=0;  REC_MLX_NOTE=""
+  if [[ -n "$REC_GGUF_ALIAS" ]]; then
+    REC_GGUF_REPO="$(model_repo_for "$REC_GGUF_ALIAS")"
+    REC_GGUF_WEIGHTS="$(model_size_gb "$REC_GGUF_REPO")"
+    REC_GGUF_NOTE="$(model_note "$REC_GGUF_ALIAS")"
+  fi
+  if [[ -n "$REC_MLX_ALIAS" ]]; then
+    REC_MLX_REPO="$(model_repo_for "$REC_MLX_ALIAS")"
+    REC_MLX_WEIGHTS="$(model_size_gb "$REC_MLX_REPO")"
+    REC_MLX_NOTE="$(model_note "$REC_MLX_ALIAS")"
+  fi
+  return 0
 }
 
 recommend_config() {
