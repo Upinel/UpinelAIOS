@@ -11,25 +11,48 @@
 #  "Make it work, make it right, make it fast - then measure it, because
 #   the third one is only a claim until the numbers agree."
 # ─────────────────────────────────────────────────────────────────────────────
-# Download uncensored Gemma 4 and Qwen models and switch between them.
+# Download uncensored models, switch between them, or bring your own.
 #
-#   ./model_download.sh                 list known models and what is on disk
-#   ./model_download.sh 12b             download one
-#   ./model_download.sh --all           download every known model
-#   ./model_download.sh --switch 12b    download if needed, set it as the
-#                                       default in env.conf, and restart
+#   ./model_download.sh                    list models and what is on disk
+#   ./model_download.sh mlx-q-35ba3b       download one by alias
+#   ./model_download.sh owner/name         download YOUR OWN model by repo id
+#   ./model_download.sh --engine gguf owner/name
+#                                          ...when the engine is not obvious
+#   ./model_download.sh --all              download every known model
+#   ./model_download.sh --switch <model>   download if needed, set it as the
+#                                          default in env.conf, and restart
 #
-# EVERY known model is an uncensored Gemma 4 fine-tune. UpinelAIOS-GGUF does not
-# ship or suggest aligned models.
+# EVERY known model is an uncensored fine-tune. UpinelAIOS does not ship or
+# suggest aligned models.
+#
+# CUSTOM MODELS. Any owner/name Hugging Face repo works. The engine is worked
+# out from the repo name - MTPLX packs say MTPLX, GGUF files say GGUF - and if
+# the name says neither, --engine settles it. A custom repo is not written to
+# the alias list; it is fetched into models/ and is then visible to
+# ./start.sh's picker like any other.
 #
 # Downloads resume, so re-running after an interruption is safe and cheap.
 
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/common.sh"
 load_config
 
-case "${1:-}" in
-  -h|--help) show_usage "$0"; exit 0 ;;
-esac
+# --engine applies to a custom repo id whose name does not say which runtime
+# serves it. It is ignored for a known alias, which already declares one.
+ENGINE_OVERRIDE=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help) show_usage "$0"; exit 0 ;;
+    --engine)
+      [[ -n "${2:-}" ]] || die "--engine needs gguf or mlx"
+      case "$2" in
+        gguf|mlx) ENGINE_OVERRIDE="$2" ;;
+        *) die "ENGINE must be gguf or mlx, not '$2'" ;;
+      esac
+      shift ;;
+    *) break ;;
+  esac
+  shift
+done
 
 # What gets fetched for each model: the selected quant, plus the vision
 # projector and the MTP draft head. Not the whole repo - several of these
@@ -109,7 +132,9 @@ list_models() {
   log ""
   log "  Download one:   ./model_download.sh 12b"
   log "  Switch to one:  ./model_download.sh --switch 12b"
-  log "  ${C_DIM}Any owner/name Hugging Face repo also works: GGUF or MTPLX.${C_RESET}"
+  log "  ${C_DIM}Your own model: any owner/name Hugging Face repo works, e.g.${C_RESET}"
+  log "  ${C_DIM}  ./model_download.sh someone/some-uncensored-GGUF${C_RESET}"
+  log "  ${C_DIM}  ./model_download.sh --engine mlx someone/some-MTPLX-pack${C_RESET}"
 }
 
 download_one() {
@@ -119,14 +144,34 @@ download_one() {
 
   if model_on_disk "$repo"; then
     ok "$want is already on disk ($(disk_usage "$repo"))"
+    # "On disk" is not the same as "complete". A GGUF model can be missing the
+    # draft head that turns MTP on, and an install made before the companion
+    # fetch existed has exactly that problem - it works, just slower, and says
+    # nothing. Repair it here rather than silently leaving it autoregressive.
+    if [[ "$(model_engine_for "$want")" == "gguf" ]] && [[ -n "$(model_companion_for "$want")" ]]; then
+      COMPANIONS_ONLY=1 FETCH_ENGINE=gguf \
+        "$REPO_DIR/lib/fetch-model.sh" "$repo" "$dir" || \
+        warn "Companion check did not finish; MTP may stay off for this model."
+    fi
     return 0
   fi
 
   # The engine follows the model. If this is the first model from the other
   # engine, install that engine now rather than failing later at ./start.sh.
-  local eng; eng="$(model_engine_for "$want")"
-  [[ -n "$eng" ]] || eng="$(model_engine_for "$repo")"
-  [[ -n "$eng" ]] || eng="gguf"
+  local eng
+  if [[ -n "$ENGINE_OVERRIDE" ]]; then
+    eng="$ENGINE_OVERRIDE"
+  else
+    eng="$(model_engine_for "$want")"
+    [[ -n "$eng" ]] || eng="$(model_engine_for "$repo")"
+  fi
+  if [[ -z "$eng" ]]; then
+    # A custom repo whose name says neither. Guessing gguf is right most of the
+    # time, but say so rather than let it fail confusingly later.
+    warn "Cannot tell whether '$repo' is a GGUF or MTPLX repo from its name."
+    warn "Assuming GGUF. Use --engine mlx if that is wrong."
+    eng="gguf"
+  fi
   load_engine "$eng"
 
   step "Downloading $want  ($(engine_name))"
@@ -147,7 +192,7 @@ download_one() {
     fi
   fi
 
-  "$REPO_DIR/lib/fetch-model.sh" "$repo" "$dir" || return 1
+  FETCH_ENGINE="$eng" "$REPO_DIR/lib/fetch-model.sh" "$repo" "$dir" || return 1
 
   if engine_model_ok "$dir"; then
     ok "Model ready: $(engine_model_summary "$dir")"

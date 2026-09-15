@@ -89,6 +89,7 @@ fi
 # Skipped when the model was named explicitly, when --yes was given, or when
 # there is no terminal to ask on.
 DO_BOTH=0
+ENGINE_FORCED=""
 if [[ -z "$MODEL_OVERRIDE" ]] && (( DO_SCAN )) && (( ! ASSUME_YES )); then
   recommend_engines
   if [[ -n "$REC_GGUF_ALIAS" && -n "$REC_MLX_ALIAS" ]]; then
@@ -100,13 +101,15 @@ if [[ -z "$MODEL_OVERRIDE" ]] && (( DO_SCAN )) && (( ! ASSUME_YES )); then
       "2" "MLX"  "$REC_MLX_ALIAS"  "$REC_MLX_WEIGHTS"  "$REC_MLX_NOTE"
     printf '  ${C_BOLD}%s${C_RESET}  %-5s %-20s %5s GB   %s\n' \
       "3" "both" "install both engines and both models" "" ""
+    printf '  ${C_BOLD}%s${C_RESET}  %-5s %-20s %5s GB   %s\n' \
+      "4" "your" "your own Hugging Face repo" "" "any uncensored owner/name"
     log ""
     log "  ${C_DIM}1 is the fastest decode measured here (106 t/s). 2 is the best"
     log "  agent balance for Qwen, and up to 2.6x llama.cpp on the same model."
     log "  3 costs about $((${REC_GGUF_WEIGHTS} + ${REC_MLX_WEIGHTS})) GB of disk.${C_RESET}"
     log ""
 
-    printf '  Choose [1/2/3]: '
+    printf '  Choose [1/2/3/4]: '
     PICK=""
     if [[ -t 0 ]]; then read -r PICK || PICK=""; else read -r PICK < /dev/tty || PICK=""; fi
     case "${PICK:-1}" in
@@ -115,6 +118,33 @@ if [[ -z "$MODEL_OVERRIDE" ]] && (( DO_SCAN )) && (( ! ASSUME_YES )); then
       3) DO_BOTH=1
          MODEL="$(model_repo_for "$REC_GGUF_ALIAS")"
          info "Both engines, starting with GGUF: $REC_GGUF_ALIAS" ;;
+      4)
+        # A repo we do not ship. The engine is inferred from the name, and
+        # asked for only when the name does not say - so this works for both
+        # engines without the user needing to know the rule.
+        log ""
+        printf '  Hugging Face repo id (owner/name): '
+        CUSTOM=""
+        if [[ -t 0 ]]; then read -r CUSTOM || CUSTOM=""; else read -r CUSTOM < /dev/tty || CUSTOM=""; fi
+        CUSTOM="${CUSTOM#"https://huggingface.co/"}"; CUSTOM="${CUSTOM%/}"
+        if [[ "$CUSTOM" != */* ]]; then
+          warn "That is not an owner/name repo id. Using the GGUF suggestion."
+          MODEL="$(model_repo_for "$REC_GGUF_ALIAS")"
+        else
+          CUSTOM_ENGINE="$(model_engine_for "$CUSTOM")"
+          if [[ -z "$CUSTOM_ENGINE" ]]; then
+            printf '  Is it a GGUF repo or an MTPLX pack? [gguf/mlx] '
+            if [[ -t 0 ]]; then read -r CUSTOM_ENGINE || CUSTOM_ENGINE=""; else read -r CUSTOM_ENGINE < /dev/tty || CUSTOM_ENGINE=""; fi
+            case "$CUSTOM_ENGINE" in
+              mlx|MLX) CUSTOM_ENGINE=mlx ;;
+              *)       CUSTOM_ENGINE=gguf ;;
+            esac
+          fi
+          MODEL="$CUSTOM"
+          ENGINE_FORCED="$CUSTOM_ENGINE"
+          info "Custom $(printf '%s' "$CUSTOM_ENGINE" | tr '[:lower:]' '[:upper:]'): $CUSTOM"
+        fi
+        ;;
       *) MODEL="$(model_repo_for "$REC_GGUF_ALIAS")"
          info "GGUF: $REC_GGUF_ALIAS" ;;
     esac
@@ -134,7 +164,10 @@ MODEL_DIR="$MODELS_DIR/${MODEL_REPO//\//--}"
 # The engine follows the model, and everything below - which runtime to
 # install, how to verify the download, whether a depth sweep applies - depends
 # on it.
-ENGINE="$(model_engine_for "${MODEL_ALIAS:-$MODEL_REPO}")"
+ENGINE="${ENGINE_FORCED:-}"
+if [[ -z "$ENGINE" ]]; then
+  ENGINE="$(model_engine_for "${MODEL_ALIAS:-$MODEL_REPO}")"
+fi
 if [[ -z "$ENGINE" ]]; then
   ENGINE="$(engine_for_dir "$MODEL_DIR")"
 fi
@@ -226,7 +259,9 @@ fi
 # ── 3. model ─────────────────────────────────────────────────────────────────
 if (( DO_MODEL )); then
   step "Fetching the model"
-  "$REPO_DIR/lib/fetch-model.sh" "$MODEL_REPO" "$MODEL_DIR"
+  # FETCH_ENGINE matters for a custom repo whose name does not reveal its
+  # engine: the choice made above has to survive into the downloader.
+  FETCH_ENGINE="$ENGINE" "$REPO_DIR/lib/fetch-model.sh" "$MODEL_REPO" "$MODEL_DIR"
 
   # "Both" means both models, not just both runtimes: an engine with no model
   # to serve is not much use on its own.

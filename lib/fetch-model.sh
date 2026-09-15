@@ -27,14 +27,25 @@
 
 REPO="${1:-}"
 DEST="${2:-}"
+
+# The per-engine fetchers source lib/common.sh themselves, but this dispatcher
+# runs before them and needs the registry to resolve the engine.
+LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=/dev/null
+source "$LIB_DIR/common.sh"
+
 [[ -n "$REPO" ]] || die "usage: fetch-model.sh <owner/name> <dest-dir>"
 
-# Resolve the engine from the repo id; fall back to the repo name, since a
-# hand-typed id may not be one we ship.
-ENGINE="$(model_engine_for "$REPO")"
+# Which engine fetches this. FETCH_ENGINE lets a caller that already knows
+# settle it - model_download.sh --engine passes it through for a custom repo
+# whose name says neither GGUF nor MTPLX.
+ENGINE="${FETCH_ENGINE:-}"
+if [[ -z "$ENGINE" ]]; then
+  ENGINE="$(model_engine_for "$REPO")"
+fi
 [[ -n "$ENGINE" ]] || ENGINE="gguf"
 
-FETCHER="$REPO_DIR/lib/fetch-model-$ENGINE.sh"
+FETCHER="$LIB_DIR/fetch-model-$ENGINE.sh"
 [[ -f "$FETCHER" ]] || die "No fetcher for engine '$ENGINE' at $FETCHER"
 
 # shellcheck source=/dev/null

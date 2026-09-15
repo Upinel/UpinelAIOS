@@ -60,7 +60,7 @@ tuned for maximum tokens/sec. Two model families ship in the box:
 
 | family | models | runtime |
 |---|---|---|
-| **Gemma 4** | `gguf-g-26ba4b` (default), `gguf-g-26ba4b-q4km`, `gguf-g-12b`, `gguf-g-31b`, `gguf-g-e2b`, `gguf-g-e4b` | llama.cpp |
+| **Gemma 4** | `gguf-g-26ba4b` (default), `gguf-g-12b`, `gguf-g-31b`, `gguf-g-e2b`, `gguf-g-e4b` | llama.cpp |
 | **Qwen 3.8** | `gguf-q-27b`, `gguf-q-9b`, `gguf-q-35ba3b` | llama.cpp |
 
 Built and measured on an **M5 Pro / 20-core GPU / 64 GB**, serving
@@ -126,7 +126,6 @@ option actually needs, measured as resident set size:
 | `gguf-g-e2b` | 3.4 GB | **4.2 GB** | 8 GB Mac |
 | `gguf-g-e4b` | 5.3 GB | 6.8 GB | 16 GB Mac |
 | `gguf-g-12b` | 7.4 GB | ~10 GB | 16 GB Mac |
-| `gguf-g-26ba4b-q4km` | 16.8 GB | 20.5 GB | 32 GB Mac |
 | `gguf-g-31b` | 17.8 GB | ~22 GB | 32 GB Mac |
 
 On an 8 GB Mac set `MODEL="e2b"`, `CONTEXT_WINDOW=8192` and
@@ -241,10 +240,21 @@ to decide.
   1  GGUF gguf-g-26ba4b     15 GB  uncensored MoE, 3B active - 106 t/s
   2  MLX  mlx-q-35ba3b      22 GB  35B MoE - fastest Qwen (~79 t/s)
   3  both                       install both engines and both models
+  4  your                       your own Hugging Face repo (owner/name)
 ```
 
 Pick 3 and you get both runtimes and both models; each is served by whatever
 `./start.sh` or the `./model_download.sh` picker selects afterwards.
+
+Pick 4 and you are asked for any `owner/name` repo. The engine is read off the
+name (`…-GGUF` is llama.cpp, `…-MTPLX…` is MLX) and asked for only when the name
+does not say — so a custom model works on either engine without you needing to
+know the rule. The same thing works non-interactively:
+
+```bash
+./model_download.sh someone/some-uncensored-GGUF
+./model_download.sh --engine mlx someone/some-MTPLX-pack
+```
 
 #### Aliases name their engine
 
@@ -256,7 +266,6 @@ and a new model cannot be added without declaring one:
 | **`gguf-g-26ba4b`** | GGUF | Gemma 4 26B-A4B Q4_0 QAT — **the default** | **106.4 t/s** |
 | `gguf-g-e2b` | GGUF | Gemma 4 E2B — snappiest first token | 99.9 t/s |
 | `gguf-g-12b` | GGUF | Gemma 4 12B — largest that fits a 16 GB Mac | 54.5 t/s |
-| `gguf-g-26ba4b-q4km` | GGUF | the same MoE in Q4_K_M — ~47% slower, skip it | 72.5 t/s |
 | `gguf-g-31b` | GGUF | Gemma 4 31B heretic — highest quality dense | — |
 | `gguf-g-e4b` | GGUF | Gemma 4 E4B — only if `26ba4b` will not fit | 63.9 t/s |
 | **`mlx-q-35ba3b`** | **MLX** | Qwen 3.6 35B-A3B MoE — **the MLX default** | **79.4 t/s** |
@@ -299,7 +308,6 @@ asked.
 | alias | download | repo |
 |---|---:|---|
 | **`gguf-g-26ba4b`** | 15 GB | `OS-Software/gemma-4-26B-A4B-it-qat-q4_0-heretic-ja-GGUF` — **default**, 106.4 t/s, Q4_0 QAT |
-| `gguf-g-26ba4b-q4km` | 18 GB | `HauhauCS/Gemma4-26B-A4B-QAT-Uncensored-HauhauCS-Balanced-MTP` — same MoE in Q4_K_M, 72.5 t/s. Skip it. |
 | `gguf-g-e2b` | 4 GB | `HauhauCS/Gemma-4-E2B-Uncensored-HauhauCS-Aggressive` — 99.9 t/s. Smallest, fits 8 GB. |
 | `gguf-g-e4b` | 6 GB | `HauhauCS/Gemma-4-E4B-Uncensored-HauhauCS-Aggressive` — 63.9 t/s. Only if `gguf-g-26ba4b` will not fit. |
 | `gguf-g-12b` | 8 GB | `HauhauCS/Gemma4-12B-QAT-Uncensored-HauhauCS-Balanced` — 54.5 t/s. Largest that fits a 16 GB Mac. |
@@ -342,7 +350,7 @@ it is:
 
 | quant | size | decode |
 |---|---:|---:|
-| Q4_K_M &nbsp;(`gguf-g-26ba4b-q4km`) | 16.8 GB | 72.5 t/s |
+| Q4_K_M &nbsp;(the same model, not shipped) | 16.8 GB | 72.5 t/s |
 | **Q4_0 QAT &nbsp;(`gguf-g-26ba4b`)** | **14.25 GB** | **106.4 t/s** |
 
 **~47% faster decode and 15% smaller, from the same weights.** Two things make
@@ -377,6 +385,14 @@ model you switch to does not publish that quant, the closest one at the same bit
 width is used and `model_download.sh` says which. The sizes above are what
 actually lands on disk: that quant, plus the vision projector and the MTP draft
 head, which are separate artifacts rather than quants and are always fetched.
+
+The default Gemma model does not publish its own MTP draft head, so that 250 MB
+file is pulled from the companion repo that does
+(`HauhauCS/Gemma4-26B-A4B-QAT-Uncensored-HauhauCS-Balanced-MTP`). Without it the
+model still runs — just autoregressive, and roughly half the speed, with nothing
+on screen to say why. Because of that, `./model_download.sh` re-checks the
+companions even when the weights are already on disk, so an install made before
+this existed gets repaired rather than left quietly slower.
 
 ```bash
 ./bench/verify-tools.sh            # check tool calling, measure a file write
@@ -611,7 +627,6 @@ token. Every model below is uncensored.
 |---|---:|---:|---:|---|
 | **`gguf-g-26ba4b`** &nbsp;Gemma 4 26B-A4B Q4_0 QAT | **106.4 t/s** | 98 t/s | 1.1 s | **The default, and the fastest thing here.** MoE with ~4B active per token; this is the build the whole project is tuned around. |
 | `gguf-g-e2b` &nbsp;Gemma 4 E2B | 99.9 t/s | 294 t/s | 1.7 s | The snappy one: fastest prefill, smallest footprint, for a small Mac or quick replies. |
-| `gguf-g-26ba4b-q4km` &nbsp;Gemma 4 26B-A4B Q4_K_M | 72.5 t/s | 271 t/s | 2.8 s | **Don't.** Same model, slower quant — `gguf-g-26ba4b` is ~47% faster and 3 GB smaller. |
 | `gguf-q-35ba3b` &nbsp;Qwen 3.6 35B-A3B | 70.5 t/s | 180 t/s | 2.7 s | Works, but the [MLX project](https://github.com/Upinel/UpinelAIOS-MLX) runs this same model faster. |
 | `gguf-g-e4b` &nbsp;Gemma 4 E4B | 63.9 t/s | 84 t/s | 0.4 s | Only when the Mac genuinely cannot fit `gguf-g-26ba4b`. |
 | `gguf-g-12b` &nbsp;Gemma 4 12B | 54.5 t/s | 81 t/s | 2.6 s | The largest model that still fits a **16 GB** Mac. `gguf-g-e2b` is nearly twice as fast, so pick it for capability, not speed. |

@@ -334,7 +334,6 @@ model_size_gb() {
 model_note() {
   case "$1" in
     gguf-g-26ba4b)   echo "uncensored MoE, 3B active - the fastest 26B here" ;;
-    gguf-g-26ba4b-q4km) echo "same MoE in Q4_K_M: about 20% slower, 3 GB bigger" ;;
     gguf-g-12b)      echo "dense 12B - smaller and less capable, still quick" ;;
     gguf-g-31b)      echo "dense 31B abliterated - the highest quality, and the slowest" ;;
     gguf-g-e4b)      echo "loses to both e2b and the 26B on every axis" ;;

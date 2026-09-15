@@ -52,6 +52,69 @@ if [[ -n "${MODEL_SOURCE_DIR:-}" && -d "${MODEL_SOURCE_DIR:-}" ]]; then
   exit 0
 fi
 
+# ── companion files the model does not publish itself ────────────────────────
+# Pulled from a second repo, one named file at a time, because the alternative
+# is downloading gigabytes to get a 250 MB draft head.
+#
+# This is a function, not inline code, because "already on disk" must not mean
+# "nothing to do": an install made before this existed has the weights but not
+# the draft head, and would run autoregressive without ever saying so.
+fetch_companions() {
+  local COMPANIONS CREPO CGLOB CNAME OUT
+  COMPANIONS="$(model_companion_for "$(alias_for_repo "$REPO")")"
+  [[ -n "$COMPANIONS" ]] || return 0
+  while IFS='|' read -r CREPO CGLOB; do
+    [[ -n "$CREPO" ]] || continue
+    # Already satisfied?
+    if compgen -G "$DEST/$CGLOB" >/dev/null 2>&1; then
+      ok "have   companion $(basename "$(compgen -G "$DEST/$CGLOB" | head -1)")"
+      continue
+    fi
+
+    CNAME="$(curl -fsSL --max-time 60 \
+      "https://huggingface.co/api/models/${CREPO}?blobs=true" 2>/dev/null \
+      | python3 -c "
+import fnmatch, json, sys
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    raise SystemExit
+pat = sys.argv[1]
+best = None
+for f in d.get('siblings', []):
+    n = f.get('rfilename', '')
+    if fnmatch.fnmatch(n.rsplit('/', 1)[-1], pat):
+        if best is None or (f.get('size') or 0) > (best[1] or 0):
+            best = (n, f.get('size') or 0)
+print(best[0] if best else '')
+" "$CGLOB")"
+
+    if [[ -z "$CNAME" ]]; then
+      warn "no companion matching '$CGLOB' in $CREPO"
+      continue
+    fi
+
+    info "companion $CNAME  (from $CREPO)"
+    OUT="$DEST/$(basename "$CNAME")"
+    if curl -fL --retry 5 --retry-delay 2 --retry-all-errors -C - \
+         -o "$OUT" "https://huggingface.co/${CREPO}/resolve/main/${CNAME}"; then
+      ok "have   $(basename "$CNAME")  ($(( $(stat -f%z "$OUT" 2>/dev/null || echo 0) / 1000000 )) MB)"
+    else
+      warn "companion download failed - the model will run autoregressive"
+      BAD=1
+    fi
+  done <<< "$COMPANIONS"
+}
+
+# COMPANIONS_ONLY=1 skips everything but the companions, for a model that is
+# already on disk. It is how ./model_download.sh repairs an existing install.
+if [[ -n "${COMPANIONS_ONLY:-}" ]]; then
+  BAD=0
+  fetch_companions
+  (( BAD )) && die "A companion file is still missing. Check the network and re-run."
+  exit 0
+fi
+
 # ── fetch the file manifest ──────────────────────────────────────────────────
 info "Querying https://huggingface.co/api/models/$REPO"
 MANIFEST="$DEST/.manifest.tsv"
@@ -300,6 +363,8 @@ while IFS=$'\t' read -r WANT NAME; do
     BAD=1
   fi
 done < "$AUDIT"
+
+fetch_companions
 
 rm -f "$DEST/.manifest.tsv" "$DEST/.manifest.json"
 

@@ -110,7 +110,7 @@ show_usage() {
 # NOTE: a case statement, not an associative array. macOS ships bash 3.2,
 # which has no `declare -A`, and this bundle must run on a stock Mac.
 MODEL_ALIASES="\
-gguf-g-26ba4b gguf-g-26ba4b-q4km gguf-g-12b gguf-g-31b gguf-g-e4b gguf-g-e2b \
+gguf-g-26ba4b gguf-g-12b gguf-g-31b gguf-g-e4b gguf-g-e2b \
 gguf-q-27b gguf-q-9b gguf-q-35ba3b \
 mlx-q-35ba3b mlx-q-27b-4bit mlx-q-27b-6bit mlx-q-27b-3bit mlx-q-27b-4bit-bz mlx-q-9b"
 
@@ -120,7 +120,7 @@ mlx-q-35ba3b mlx-q-27b-4bit mlx-q-27b-6bit mlx-q-27b-3bit mlx-q-27b-4bit-bz mlx-
 legacy_alias_for() {
   case "$1" in
     26b-q4)      echo gguf-g-26ba4b      ;;
-    26b-a4b)     echo gguf-g-26ba4b-q4km ;;
+    26b-a4b)     echo ""                 ;;  # removed; use gguf-g-26ba4b
     12b)         echo gguf-g-12b         ;;
     31b-heretic) echo gguf-g-31b         ;;
     e4b)         echo gguf-g-e4b         ;;
@@ -170,6 +170,25 @@ model_engine_for() {
   esac
 }
 
+# Companion files a model needs but does NOT publish itself.
+#
+# Prints "<repo>|<glob>" lines. Empty when the model is self-contained.
+#
+# gguf-g-26ba4b is the case this exists for. That repo publishes weights and a
+# projector and nothing else - no MTP draft head - while the whole 106 t/s
+# headline depends on speculative decoding. The draft lives in a sibling
+# repo. Fetching that repo wholesale would cost 17 GB for a 0.25 GB file, so
+# the companion is copied in on its own.
+model_companion_for() {
+  case "$1" in
+    gguf-g-26ba4b)
+      printf '%s|%s\n' \
+        "HauhauCS/Gemma4-26B-A4B-QAT-Uncensored-HauhauCS-Balanced-MTP" "mtp-*.gguf"
+      ;;
+  esac
+  return 0
+}
+
 model_repo_for() {
   local _a
   _a="$(legacy_alias_for "$1")"
@@ -180,7 +199,11 @@ model_repo_for() {
 
   case "$1" in
     gguf-g-26ba4b)      echo "OS-Software/gemma-4-26B-A4B-it-qat-q4_0-heretic-ja-GGUF" ;;
-    gguf-g-26ba4b-q4km)     echo "HauhauCS/Gemma4-26B-A4B-QAT-Uncensored-HauhauCS-Balanced-MTP" ;;
+    # gguf-g-26ba4b-q4km used to live here: the same Gemma 4 26B-A4B MoE in
+    # Q4_K_M, 47% slower to decode and 3 GB larger than the Q4_0 QAT build
+    # above, so it was an alias nobody should pick. Removed. The repo it
+    # pointed at still matters, though - see model_companion_for(), which
+    # borrows its MTP draft head, because the Q4_0 release publishes none.
     gguf-g-12b)         echo "HauhauCS/Gemma4-12B-QAT-Uncensored-HauhauCS-Balanced" ;;
     gguf-g-31b) echo "llmfan46/gemma-4-31B-it-uncensored-heretic-GGUF" ;;
     gguf-g-e4b)         echo "HauhauCS/Gemma-4-E4B-Uncensored-HauhauCS-Aggressive" ;;
