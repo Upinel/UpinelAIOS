@@ -82,6 +82,51 @@ print_hardware() {
 #   * KV costs 64/34/18 KB per token for f16/q8/q4 (only 16 of 64 layers cache)
 #   * the KV cache is the second allocator after the weights, and on the Qwen
 #     models - which cache KV on every layer - it can outgrow the weights
+# ── per-engine recommendation ────────────────────────────────────────────────
+# UpinelAIOS serves two engines, and the honest thing is to suggest a model for
+# EACH rather than pick one on the user's behalf: they are not the same offer.
+#
+#   gguf  llama.cpp   Gemma 4 at peak decode - 106 t/s measured - and vision
+#   mlx   MTPLX       anything Qwen; up to 2.6x llama.cpp on the same model
+#
+# Both are judged with model_fit(), so the same memory arithmetic decides both
+# and neither can recommend something this Mac cannot load.
+#
+# Sets: REC_GGUF_ALIAS/_REPO/_WEIGHTS/_NOTE and the MLX equivalents.
+recommend_engines() {
+  local ram="$HW_RAM_GB" cand fit verdict
+
+  # Preference order per engine, best first. The list is walked until one fits;
+  # the last entry is taken regardless, so there is always an answer.
+  local gguf_ladder="gguf-g-26ba4b gguf-g-12b gguf-g-e2b"
+  local mlx_ladder="mlx-q-35ba3b mlx-q-27b-4bit mlx-q-9b"
+
+  REC_GGUF_ALIAS=""; REC_MLX_ALIAS=""
+
+  for cand in $gguf_ladder; do
+    fit="$(model_fit "$cand")"; verdict="${fit#* }"
+    if [[ "$verdict" != "will not fit" ]] || [[ "$cand" == "${gguf_ladder##* }" ]]; then
+      REC_GGUF_ALIAS="$cand"; REC_GGUF_NEED="${fit%% *}"; REC_GGUF_VERDICT="$verdict"
+      break
+    fi
+  done
+
+  for cand in $mlx_ladder; do
+    fit="$(model_fit "$cand")"; verdict="${fit#* }"
+    if [[ "$verdict" != "will not fit" ]] || [[ "$cand" == "${mlx_ladder##* }" ]]; then
+      REC_MLX_ALIAS="$cand"; REC_MLX_NEED="${fit%% *}"; REC_MLX_VERDICT="$verdict"
+      break
+    fi
+  done
+
+  REC_GGUF_REPO="$(model_repo_for "$REC_GGUF_ALIAS")"
+  REC_MLX_REPO="$(model_repo_for "$REC_MLX_ALIAS")"
+  REC_GGUF_WEIGHTS="$(model_size_gb "$REC_GGUF_REPO")"
+  REC_MLX_WEIGHTS="$(model_size_gb "$REC_MLX_REPO")"
+  REC_GGUF_NOTE="$(model_note "$REC_GGUF_ALIAS")"
+  REC_MLX_NOTE="$(model_note "$REC_MLX_ALIAS")"
+}
+
 recommend_config() {
   local ram="$HW_RAM_GB"
 
@@ -94,15 +139,15 @@ recommend_config() {
   # t/s measured) and is 15% smaller. Recommending the K-quant here would hand
   # a fresh install a slower model than the one start.sh defaults to.
   if (( ram >= 48 )); then
-    REC_MODEL="$(model_repo_for 26b-q4)"
+    REC_MODEL="$(model_repo_for gguf-g-26ba4b)"
     REC_WEIGHTS_GB=15
     REC_REASON_MODEL="26B-A4B Q4_0 QAT is the quality pick: MoE, ~4B active per token, uncensored, and the fastest thing that runs here"
   elif (( ram >= 16 )); then
-    REC_MODEL="$(model_repo_for 12b)"
+    REC_MODEL="$(model_repo_for gguf-g-12b)"
     REC_WEIGHTS_GB=8
     REC_REASON_MODEL="12B fits ${ram} GB comfortably; the 26B MoE wants ~16 GB resident before context"
   else
-    REC_MODEL="$(model_repo_for e2b)"
+    REC_MODEL="$(model_repo_for gguf-g-e2b)"
     REC_WEIGHTS_GB=4
     REC_REASON_MODEL="${ram} GB is tight; E2B is the only model here that fits, at ~4.2 GB resident, and it still decodes at ~100 t/s"
   fi
@@ -288,15 +333,22 @@ model_size_gb() {
 # One-line note about a model, shown beside its verdict.
 model_note() {
   case "$1" in
-    26b-q4)      echo "uncensored MoE, 3B active - the fastest 26B here" ;;
-    26b-a4b)     echo "same MoE in Q4_K_M: about 20% slower, 3 GB bigger" ;;
-    12b)         echo "dense 12B - smaller and less capable, still quick" ;;
-    31b-heretic) echo "dense 31B abliterated - the highest quality, and the slowest" ;;
-    e4b)         echo "loses to both e2b and the 26B on every axis" ;;
-    e2b)         echo "smallest, and the fastest small model: fits an 8 GB Mac" ;;
-    qwen-27b)    echo "dense 27B, ~13.5 t/s; its MTP head needs a build step - or use the MLX build (~2.6x faster)" ;;
-    qwen-9b)     echo "dense 9B, ~44 t/s - the MLX build is ~47% faster on this model" ;;
-    qwen-35b)    echo "MoE like the default, different family (Qwen 3.6, not 3.8)" ;;
+    gguf-g-26ba4b)   echo "uncensored MoE, 3B active - the fastest 26B here" ;;
+    gguf-g-26ba4b-q4km) echo "same MoE in Q4_K_M: about 20% slower, 3 GB bigger" ;;
+    gguf-g-12b)      echo "dense 12B - smaller and less capable, still quick" ;;
+    gguf-g-31b)      echo "dense 31B abliterated - the highest quality, and the slowest" ;;
+    gguf-g-e4b)      echo "loses to both e2b and the 26B on every axis" ;;
+    gguf-g-e2b)      echo "smallest, and the fastest small model: fits an 8 GB Mac" ;;
+    gguf-q-27b)      echo "dense 27B, ~13.5 t/s; its MTP head needs a build step - or use the MLX build (~2.6x faster)" ;;
+    gguf-q-9b)       echo "dense 9B, ~44 t/s - the MLX build is ~47% faster on this model" ;;
+    gguf-q-35ba3b)   echo "MoE like the default, different family (Qwen 3.6, not 3.8)" ;;
+    # ── MLX ──
+    mlx-q-35ba3b)    echo "35B MoE, ~3B active - fastest Qwen here (~79 t/s), best agent balance" ;;
+    mlx-q-27b-4bit)  echo "dense 27B 4-bit - the quality pick (~35 t/s)" ;;
+    mlx-q-27b-6bit)  echo "dense 27B 6-bit - closer to the original weights, slower" ;;
+    mlx-q-27b-3bit)  echo "dense 27B at 3-bit - smallest 27B, some quality loss" ;;
+    mlx-q-27b-4bit-bz) echo "another 27B 4-bit conversion, 1 GB bigger than mlx-q-27b-4bit" ;;
+    mlx-q-9b)        echo "dense 9B (~65 t/s) - only when memory is tight" ;;
     *)           echo "" ;;
   esac
 }
@@ -320,7 +372,7 @@ model_fit() {
   need_gb=$(( size_kb + kv_gb + 3 ))
 
   local verdict
-  if [[ -n "$REC_ALIAS" && "$_mf" == "$REC_ALIAS" ]]; then
+  if [[ -n "${REC_ALIAS:-}" && "$_mf" == "$REC_ALIAS" ]]; then
     verdict="RECOMMENDED"
   elif (( need_gb + 4 <= HW_RAM_GB )); then
     verdict="fits comfortably"

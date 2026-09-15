@@ -109,7 +109,34 @@ show_usage() {
 #
 # NOTE: a case statement, not an associative array. macOS ships bash 3.2,
 # which has no `declare -A`, and this bundle must run on a stock Mac.
-MODEL_ALIASES="26b-q4 26b-a4b 12b 31b-heretic e4b e2b qwen-27b qwen-9b qwen-35b 4bit 6bit 27b-3bit 27b-4bit 9b moe"
+MODEL_ALIASES="\
+gguf-g-26ba4b gguf-g-26ba4b-q4km gguf-g-12b gguf-g-31b gguf-g-e4b gguf-g-e2b \
+gguf-q-27b gguf-q-9b gguf-q-35ba3b \
+mlx-q-35ba3b mlx-q-27b-4bit mlx-q-27b-6bit mlx-q-27b-3bit mlx-q-27b-4bit-bz mlx-q-9b"
+
+# Aliases from before the rename. Still accepted - an existing env.conf or a
+# bookmarked command keeps working - but warned about, and mapped to the new
+# name so there is exactly one entry per model.
+legacy_alias_for() {
+  case "$1" in
+    26b-q4)      echo gguf-g-26ba4b      ;;
+    26b-a4b)     echo gguf-g-26ba4b-q4km ;;
+    12b)         echo gguf-g-12b         ;;
+    31b-heretic) echo gguf-g-31b         ;;
+    e4b)         echo gguf-g-e4b         ;;
+    e2b)         echo gguf-g-e2b         ;;
+    qwen-27b)    echo gguf-q-27b         ;;
+    qwen-9b)     echo gguf-q-9b          ;;
+    qwen-35b)    echo gguf-q-35ba3b      ;;
+    4bit)        echo mlx-q-27b-4bit     ;;
+    6bit)        echo mlx-q-27b-6bit     ;;
+    27b-3bit)    echo mlx-q-27b-3bit     ;;
+    27b-4bit)    echo mlx-q-27b-4bit-bz  ;;
+    9b)          echo mlx-q-9b           ;;
+    moe)         echo mlx-q-35ba3b       ;;
+    *)           echo ""                 ;;
+  esac
+}
 
 # Which engine serves this alias: gguf | mlx. Empty when unknown.
 #
@@ -118,61 +145,63 @@ MODEL_ALIASES="26b-q4 26b-a4b 12b 31b-heretic e4b e2b qwen-27b qwen-9b qwen-35b 
 # returns empty and the caller decides what to do about it.
 model_engine_for() {
   local a
+  # The rename put the engine in the alias, so a known alias needs no table at
+  # all - the name says which runtime serves it. This is the main practical win
+  # of the format: a new model cannot forget to declare its engine.
   case "$1" in
-    # ── llama.cpp ──
-    26b-q4|26b-a4b|12b|31b-heretic|e4b|e2b|qwen-27b|qwen-9b|qwen-35b) echo gguf; return 0 ;;
-    # ── MLX / MTPLX ──
-    4bit|6bit|27b-3bit|27b-4bit|9b|moe)                              echo mlx;  return 0 ;;
+    gguf-*) echo gguf; return 0 ;;
+    mlx-*)  echo mlx;  return 0 ;;
   esac
 
-  # A repo id for a model we ship: resolve it through the alias table, because
-  # several registered repos do not say GGUF in their name - qwen-35b's is
-  # "HauhauCS/Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive" - and guessing
-  # from the name alone would leave them unclassified.
-  a="$(alias_for_repo "$1")"
-  if [[ -n "$a" ]]; then
-    case "$a" in
-      4bit|6bit|27b-3bit|27b-4bit|9b|moe) echo mlx  ;;
-      *)                                  echo gguf ;;
-    esac
-    return 0
-  fi
+  a="$(legacy_alias_for "$1")"
+  [[ -n "$a" ]] && { model_engine_for "$a"; return 0; }
 
-  # An unregistered repo id: infer from the name. Best effort only - callers
-  # that have a directory should prefer engine_for_dir(), which looks at the
-  # contents instead of the name.
+  # A registered repo id: resolve through the alias table, because several of
+  # them do not say GGUF in the name.
+  a="$(alias_for_repo "$1")"
+  if [[ -n "$a" ]]; then model_engine_for "$a"; return 0; fi
+
+  # An unregistered repo id: infer from the name, best effort. Callers holding
+  # a directory should use engine_for_dir(), which looks at the contents.
   case "$1" in
-    *MTPLX*|*mtplx*)       echo mlx  ;;
-    *GGUF*|*gguf*)         echo gguf ;;
-    *)                     echo ""   ;;
+    *MTPLX*|*mtplx*) echo mlx  ;;
+    *GGUF*|*gguf*)   echo gguf ;;
+    *)               echo ""   ;;
   esac
 }
 
 model_repo_for() {
+  local _a
+  _a="$(legacy_alias_for "$1")"
+  if [[ -n "$_a" ]]; then
+    warn "MODEL alias \"$1\" was renamed to \"$_a\" - update env.conf."
+    set -- "$_a"
+  fi
+
   case "$1" in
-    26b-q4)      echo "OS-Software/gemma-4-26B-A4B-it-qat-q4_0-heretic-ja-GGUF" ;;
-    26b-a4b)     echo "HauhauCS/Gemma4-26B-A4B-QAT-Uncensored-HauhauCS-Balanced-MTP" ;;
-    12b)         echo "HauhauCS/Gemma4-12B-QAT-Uncensored-HauhauCS-Balanced" ;;
-    31b-heretic) echo "llmfan46/gemma-4-31B-it-uncensored-heretic-GGUF" ;;
-    e4b)         echo "HauhauCS/Gemma-4-E4B-Uncensored-HauhauCS-Aggressive" ;;
-    e2b)         echo "HauhauCS/Gemma-4-E2B-Uncensored-HauhauCS-Aggressive" ;;
+    gguf-g-26ba4b)      echo "OS-Software/gemma-4-26B-A4B-it-qat-q4_0-heretic-ja-GGUF" ;;
+    gguf-g-26ba4b-q4km)     echo "HauhauCS/Gemma4-26B-A4B-QAT-Uncensored-HauhauCS-Balanced-MTP" ;;
+    gguf-g-12b)         echo "HauhauCS/Gemma4-12B-QAT-Uncensored-HauhauCS-Balanced" ;;
+    gguf-g-31b) echo "llmfan46/gemma-4-31B-it-uncensored-heretic-GGUF" ;;
+    gguf-g-e4b)         echo "HauhauCS/Gemma-4-E4B-Uncensored-HauhauCS-Aggressive" ;;
+    gguf-g-e2b)         echo "HauhauCS/Gemma-4-E2B-Uncensored-HauhauCS-Aggressive" ;;
     # ── MLX / MTPLX ──────────────────────────────────────────────────────────
-    4bit)        echo "itrejomx/Qwen3.8-27B-Uncensored-HauhauCS-Aggressive-MTPLX-4bit" ;;
-    6bit)        echo "itrejomx/Qwen3.8-27B-Uncensored-HauhauCS-Aggressive-MTPLX-6bit" ;;
-    27b-3bit)    echo "barozp/Qwen3.8-27B-Uncensored-MTPLX-3bit" ;;
-    27b-4bit)    echo "barozp/Qwen3.8-27B-Uncensored-MTPLX-4bit" ;;
-    9b)          echo "Foresee/Qwen3.8-9B-heretic-uncensored-4bit-MTPLX" ;;
-    moe)         echo "hawhyhb/Qwen3.6-35B-A3B-Uncensored-Heretic-MTPLX-4bit-FP16" ;;
+    mlx-q-27b-4bit)        echo "itrejomx/Qwen3.8-27B-Uncensored-HauhauCS-Aggressive-MTPLX-4bit" ;;
+    mlx-q-27b-6bit)        echo "itrejomx/Qwen3.8-27B-Uncensored-HauhauCS-Aggressive-MTPLX-6bit" ;;
+    mlx-q-27b-3bit)    echo "barozp/Qwen3.8-27B-Uncensored-MTPLX-3bit" ;;
+    mlx-q-27b-4bit-bz)    echo "barozp/Qwen3.8-27B-Uncensored-MTPLX-4bit" ;;
+    mlx-q-9b)          echo "Foresee/Qwen3.8-9B-heretic-uncensored-4bit-MTPLX" ;;
+    mlx-q-35ba3b)         echo "hawhyhb/Qwen3.6-35B-A3B-Uncensored-Heretic-MTPLX-4bit-FP16" ;;
     # ── Qwen ─────────────────────────────────────────────────────────────────
     # Same rule as the Gemma side: uncensored only. Qwen3.8 is served through
     # llama.cpp like everything else here, so the family is just another set of
     # registry entries rather than a second code path.
-    qwen-27b)    echo "HauhauCS/Qwen3.8-27B-Uncensored-HauhauCS-Aggressive-MTP-GGUF" ;;
-    qwen-9b)     echo "mradermacher/Qwen3.8-9B-heretic-uncensored-i1-GGUF" ;;
+    gguf-q-27b)    echo "HauhauCS/Qwen3.8-27B-Uncensored-HauhauCS-Aggressive-MTP-GGUF" ;;
+    gguf-q-9b)     echo "mradermacher/Qwen3.8-9B-heretic-uncensored-i1-GGUF" ;;
     # Qwen never released a 3.8 35B-A3B. This is the HauhauCS uncensored 3.6
     # 35B-A3B build - same MoE shape, nearest thing that exists. Named for what
     # it is rather than mislabelled as 3.8.
-    qwen-35b)    echo "HauhauCS/Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive" ;;
+    gguf-q-35ba3b)    echo "HauhauCS/Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive" ;;
     */*)         echo "$1" ;;
     *)           die "MODEL=\"$1\" is neither a known alias nor an owner/name repo id.
     Known aliases: $MODEL_ALIASES" ;;
@@ -226,7 +255,7 @@ PYSET
 load_config() {
   [[ -f "$ENV_FILE" ]] || die "env.conf not found at $ENV_FILE"
 
-  MODEL="26b-q4"
+  MODEL="gguf-g-26ba4b"
   MODELS_DIR="$REPO_DIR/models"
   CONTEXT_WINDOW=131072
   MAX_RESPONSE_TOKENS=32768
@@ -442,7 +471,7 @@ choose_model_on_disk() {
   log ""
   log "  ${C_BOLD}Models on disk${C_RESET}   ${C_DIM}${#dirs[@]} downloaded - pick one to serve now${C_RESET}"
   log ""
-  printf '  %2s  %-5s %-12s %6s  %s\n' "#" "ENGINE" "ALIAS" "SIZE" ""
+  printf '  %2s  %-5s %-20s %6s  %s\n' "#" "ENGINE" "ALIAS" "SIZE" ""
   i=1
   for d in "${dirs[@]}"; do
     repo="$(model_repo_from_dir "$d")"
@@ -461,7 +490,7 @@ choose_model_on_disk() {
     (( i == default_idx )) && mark="${C_DIM}<- default${C_RESET}"
     # tr, not ${eng^^}: bash 3.2 ships on macOS and has no case conversion.
     engup="$(printf '%s' "$eng" | tr '[:lower:]' '[:upper:]')"
-    printf '  %2d  %s%-5s%s %-12s %4s GB  %s\n' \
+    printf '  %2d  %s%-5s%s %-20s %4s GB  %s\n' \
       "$i" "$engc" "$engup" "$C_RESET" "$name" "$size" "$mark"
     i=$(( i + 1 ))
   done

@@ -80,6 +80,56 @@ else
   MODEL_ALIAS="$(alias_for_repo "$MODEL_REPO")"
 fi
 
+# ── which engine, and therefore which model ──────────────────────────────────
+# The hardware scan above recommends settings. The engine is a separate
+# question, and not one to answer on the user's behalf: GGUF and MLX are
+# different offers - Gemma at peak decode versus Qwen up to 2.6x faster - so
+# both are shown with the measured reason to want each.
+#
+# Skipped when the model was named explicitly, when --yes was given, or when
+# there is no terminal to ask on.
+DO_BOTH=0
+if [[ -z "$MODEL_OVERRIDE" ]] && (( DO_SCAN )) && (( ! ASSUME_YES )); then
+  recommend_engines
+  if [[ -n "$REC_GGUF_ALIAS" && -n "$REC_MLX_ALIAS" ]]; then
+    step "Which engine?"
+    log ""
+    printf '  ${C_BOLD}%s${C_RESET}  %-5s %-20s %5s GB   %s\n' \
+      "1" "GGUF" "$REC_GGUF_ALIAS" "$REC_GGUF_WEIGHTS" "$REC_GGUF_NOTE"
+    printf '  ${C_BOLD}%s${C_RESET}  %-5s %-20s %5s GB   %s\n' \
+      "2" "MLX"  "$REC_MLX_ALIAS"  "$REC_MLX_WEIGHTS"  "$REC_MLX_NOTE"
+    printf '  ${C_BOLD}%s${C_RESET}  %-5s %-20s %5s GB   %s\n' \
+      "3" "both" "install both engines and both models" "" ""
+    log ""
+    log "  ${C_DIM}1 is the fastest decode measured here (106 t/s). 2 is the best"
+    log "  agent balance for Qwen, and up to 2.6x llama.cpp on the same model."
+    log "  3 costs about $((${REC_GGUF_WEIGHTS} + ${REC_MLX_WEIGHTS})) GB of disk.${C_RESET}"
+    log ""
+
+    printf '  Choose [1/2/3]: '
+    PICK=""
+    if [[ -t 0 ]]; then read -r PICK || PICK=""; else read -r PICK < /dev/tty || PICK=""; fi
+    case "${PICK:-1}" in
+      2) MODEL="$(model_repo_for "$REC_MLX_ALIAS")"
+         info "MLX: $REC_MLX_ALIAS" ;;
+      3) DO_BOTH=1
+         MODEL="$(model_repo_for "$REC_GGUF_ALIAS")"
+         info "Both engines, starting with GGUF: $REC_GGUF_ALIAS" ;;
+      *) MODEL="$(model_repo_for "$REC_GGUF_ALIAS")"
+         info "GGUF: $REC_GGUF_ALIAS" ;;
+    esac
+    set_config_value MODEL "$MODEL"
+    log ""
+  fi
+fi
+
+# The engine choice above may have changed MODEL, so re-derive the repo and
+# alias from it before anything reads them. Missing this is how the installer
+# came to install llama.cpp after the user picked MLX.
+MODEL_REPO="$(model_repo_for "$MODEL")"
+MODEL_ALIAS="$(alias_for_repo "$MODEL_REPO")"
+MODEL_DIR="$MODELS_DIR/${MODEL_REPO//\//--}"
+
 # ── which engine serves the chosen model ─────────────────────────────────────
 # The engine follows the model, and everything below - which runtime to
 # install, how to verify the download, whether a depth sweep applies - depends
@@ -177,6 +227,20 @@ fi
 if (( DO_MODEL )); then
   step "Fetching the model"
   "$REPO_DIR/lib/fetch-model.sh" "$MODEL_REPO" "$MODEL_DIR"
+
+  # "Both" means both models, not just both runtimes: an engine with no model
+  # to serve is not much use on its own.
+  if (( DO_BOTH )); then
+    OTHER_ALIAS="$REC_MLX_ALIAS"; OTHER_REPO="$REC_MLX_REPO"
+    OTHER_DIR="$MODELS_DIR/${OTHER_REPO//\//--}"
+    if [[ -n "$OTHER_REPO" ]] && ! model_dir_ok "$OTHER_DIR"; then
+      step "Also fetching the MLX suggestion ($OTHER_ALIAS)"
+      "$REPO_DIR/lib/fetch-model.sh" "$OTHER_REPO" "$OTHER_DIR" || \
+        warn "Second model did not download; the GGUF one is ready."
+    else
+      info "Second model already on disk."
+    fi
+  fi
 
   info "Checking the model files..."
   # Each engine knows what a complete model looks like: one weight file for

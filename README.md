@@ -60,8 +60,8 @@ tuned for maximum tokens/sec. Two model families ship in the box:
 
 | family | models | runtime |
 |---|---|---|
-| **Gemma 4** | `26b-q4` (default), `26b-a4b`, `12b`, `31b-heretic`, `e2b`, `e4b` | llama.cpp |
-| **Qwen 3.8** | `qwen-27b`, `qwen-9b`, `qwen-35b` | llama.cpp |
+| **Gemma 4** | `gguf-g-26ba4b` (default), `gguf-g-26ba4b-q4km`, `gguf-g-12b`, `gguf-g-31b`, `gguf-g-e2b`, `gguf-g-e4b` | llama.cpp |
+| **Qwen 3.8** | `gguf-q-27b`, `gguf-q-9b`, `gguf-q-35ba3b` | llama.cpp |
 
 Built and measured on an **M5 Pro / 20-core GPU / 64 GB**, serving
 `OS-Software/gemma-4-26B-A4B-it-qat-q4_0-heretic-ja-GGUF` through llama.cpp with
@@ -122,16 +122,16 @@ option actually needs, measured as resident set size:
 
 | model | file | RAM used | fits |
 |---|---:|---:|---|
-| `e2b` | 3.4 GB | **4.2 GB** | 8 GB Mac |
-| `e4b` | 5.3 GB | 6.8 GB | 16 GB Mac |
-| `12b` | 7.4 GB | ~10 GB | 16 GB Mac |
-| `26b-a4b` | 16.8 GB | 20.5 GB | 32 GB Mac |
-| `31b-heretic` | 17.8 GB | ~22 GB | 32 GB Mac |
+| `gguf-g-e2b` | 3.4 GB | **4.2 GB** | 8 GB Mac |
+| `gguf-g-e4b` | 5.3 GB | 6.8 GB | 16 GB Mac |
+| `gguf-g-12b` | 7.4 GB | ~10 GB | 16 GB Mac |
+| `gguf-g-26ba4b-q4km` | 16.8 GB | 20.5 GB | 32 GB Mac |
+| `gguf-g-31b` | 17.8 GB | ~22 GB | 32 GB Mac |
 
 On an 8 GB Mac set `MODEL="e2b"`, `CONTEXT_WINDOW=8192` and
 `MEMORY_LIMIT_GB=6`. macOS itself wants 3–4 GB, so leave it that room. On a
-16 GB Mac, `e2b` is comfortable, `12b` is the largest model that fits, and the
-default `26b-q4` does not — it wants ~19 GB with its context.
+16 GB Mac, `gguf-g-e2b` is comfortable, `gguf-g-12b` is the largest model that fits, and the
+default `gguf-g-26ba4b` does not — it wants ~19 GB with its context.
 
 Disk: 4–20 GB per model, depending which you pick.
 
@@ -169,7 +169,7 @@ on you:
 ```
 
 It is a one-run choice and is not written back — `MODEL` in `env.conf` is still
-the default. Pass `--model 12b` to skip the question entirely, and note that it
+the default. Pass `--model gguf-g-12b` to skip the question entirely, and note that it
 is skipped automatically whenever there is no terminal to ask on (a pipe, CI,
 `nohup`, launchd) or only one model is downloaded.
 
@@ -253,32 +253,32 @@ asked.
 
 | alias | download | repo |
 |---|---:|---|
-| **`26b-q4`** | 15 GB | `OS-Software/gemma-4-26B-A4B-it-qat-q4_0-heretic-ja-GGUF` — **default**, 106.4 t/s, Q4_0 QAT |
-| `26b-a4b` | 18 GB | `HauhauCS/Gemma4-26B-A4B-QAT-Uncensored-HauhauCS-Balanced-MTP` — same MoE in Q4_K_M, 72.5 t/s. Skip it. |
-| `e2b` | 4 GB | `HauhauCS/Gemma-4-E2B-Uncensored-HauhauCS-Aggressive` — 99.9 t/s. Smallest, fits 8 GB. |
-| `e4b` | 6 GB | `HauhauCS/Gemma-4-E4B-Uncensored-HauhauCS-Aggressive` — 63.9 t/s. Only if `26b-q4` will not fit. |
-| `12b` | 8 GB | `HauhauCS/Gemma4-12B-QAT-Uncensored-HauhauCS-Balanced` — 54.5 t/s. Largest that fits a 16 GB Mac. |
-| `31b-heretic` | 20 GB | `llmfan46/gemma-4-31B-it-uncensored-heretic-GGUF` — highest quality dense model |
+| **`gguf-g-26ba4b`** | 15 GB | `OS-Software/gemma-4-26B-A4B-it-qat-q4_0-heretic-ja-GGUF` — **default**, 106.4 t/s, Q4_0 QAT |
+| `gguf-g-26ba4b-q4km` | 18 GB | `HauhauCS/Gemma4-26B-A4B-QAT-Uncensored-HauhauCS-Balanced-MTP` — same MoE in Q4_K_M, 72.5 t/s. Skip it. |
+| `gguf-g-e2b` | 4 GB | `HauhauCS/Gemma-4-E2B-Uncensored-HauhauCS-Aggressive` — 99.9 t/s. Smallest, fits 8 GB. |
+| `gguf-g-e4b` | 6 GB | `HauhauCS/Gemma-4-E4B-Uncensored-HauhauCS-Aggressive` — 63.9 t/s. Only if `gguf-g-26ba4b` will not fit. |
+| `gguf-g-12b` | 8 GB | `HauhauCS/Gemma4-12B-QAT-Uncensored-HauhauCS-Balanced` — 54.5 t/s. Largest that fits a 16 GB Mac. |
+| `gguf-g-31b` | 20 GB | `llmfan46/gemma-4-31B-it-uncensored-heretic-GGUF` — highest quality dense model |
 
 #### Qwen
 
 | alias | download | repo |
 |---|---:|---|
-| `qwen-27b` | 19 GB | `HauhauCS/Qwen3.8-27B-Uncensored-HauhauCS-Aggressive-MTP-GGUF` |
-| `qwen-9b` | 6 GB | `mradermacher/Qwen3.8-9B-heretic-uncensored-i1-GGUF` |
-| `qwen-35b` | 22 GB | `HauhauCS/Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive` |
+| `gguf-q-27b` | 19 GB | `HauhauCS/Qwen3.8-27B-Uncensored-HauhauCS-Aggressive-MTP-GGUF` |
+| `gguf-q-9b` | 6 GB | `mradermacher/Qwen3.8-9B-heretic-uncensored-i1-GGUF` |
+| `gguf-q-35ba3b` | 22 GB | `HauhauCS/Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive` |
 
 **Two things to know before you pick Qwen here.**
 
-`qwen-35b` is **3.6, not 3.8.** Qwen never released a 3.8 35B-A3B; the only repo
+`gguf-q-35ba3b` is **3.6, not 3.8.** Qwen never released a 3.8 35B-A3B; the only repo
 labelled 3.8 35B-A3B is a 3.6 distill carrying a single ROCm-format quant. It is
 named for what it actually is rather than mislabelled.
 
-`qwen-27b` MTP needs a **patched llama.cpp**, and the build is one command:
+`gguf-q-27b` MTP needs a **patched llama.cpp**, and the build is one command:
 
 ```bash
 ./lib/build-fastmtp.sh      # clones, patches, builds, wires it into env.conf
-./start.sh --model qwen-27b # picks it up automatically for this model only
+./start.sh --model gguf-q-27b # picks it up automatically for this model only
 ```
 
 **7.6 t/s → ~14–15 t/s.** The patch only touches the Qwen35 architecture, and
@@ -297,8 +297,8 @@ it is:
 
 | quant | size | decode |
 |---|---:|---:|
-| Q4_K_M &nbsp;(`26b-a4b`) | 16.8 GB | 72.5 t/s |
-| **Q4_0 QAT &nbsp;(`26b-q4`)** | **14.25 GB** | **106.4 t/s** |
+| Q4_K_M &nbsp;(`gguf-g-26ba4b-q4km`) | 16.8 GB | 72.5 t/s |
+| **Q4_0 QAT &nbsp;(`gguf-g-26ba4b`)** | **14.25 GB** | **106.4 t/s** |
 
 **~47% faster decode and 15% smaller, from the same weights.** Two things make
 that safe rather than a quality gamble:
@@ -313,7 +313,7 @@ The existing MTP drafter works with it unchanged.
 #### Dense and MoE models are not comparable
 
 A dense 27B reads ~15 GB of weights for every token; that is what this memory
-bandwidth supports, not a bug — which is why `qwen-27b` sits at 13.5 t/s while
+bandwidth supports, not a bug — which is why `gguf-q-27b` sits at 13.5 t/s while
 the 26B Gemma, a mixture of experts with only ~4B active per token, reaches
 106 t/s.
 
@@ -323,7 +323,7 @@ implementation works on Metal and llama.cpp's does not, which is the clearest
 reason the two projects exist side by side.
 
 **Only one quant is downloaded.** GGUF repos often publish every quant of the
-same model, and the `31b-heretic` repo carries ten of them — 232 GB in total,
+same model, and the `gguf-g-31b` repo carries ten of them — 232 GB in total,
 of which the 18.7 GB `Q4_K_M` is the one that fits a Mac. Fetching the repo
 wholesale would cost twelve times the disk and hours of download, so
 UpinelAIOS-GGUF picks a single quant (`MODEL_QUANT` in `env.conf`, default
@@ -336,9 +336,9 @@ head, which are separate artifacts rather than quants and are always fetched.
 ```bash
 ./bench/verify-tools.sh            # check tool calling, measure a file write
 ./model_download.sh                # what is available, what you have
-./model_download.sh 12b            # download one
+./model_download.sh gguf-g-12b            # download one
 ./model_download.sh --switch 12b   # download if needed, switch, restart
-./start.sh --model 12b             # serve a different model for one run
+./start.sh --model gguf-g-12b             # serve a different model for one run
 ```
 
 ### Thinking
@@ -564,16 +564,16 @@ token. Every model below is uncensored.
 
 | model | decode | prefill | TTFT | when to use it |
 |---|---:|---:|---:|---|
-| **`26b-q4`** &nbsp;Gemma 4 26B-A4B Q4_0 QAT | **106.4 t/s** | 98 t/s | 1.1 s | **The default, and the fastest thing here.** MoE with ~4B active per token; this is the build the whole project is tuned around. |
-| `e2b` &nbsp;Gemma 4 E2B | 99.9 t/s | 294 t/s | 1.7 s | The snappy one: fastest prefill, smallest footprint, for a small Mac or quick replies. |
-| `26b-a4b` &nbsp;Gemma 4 26B-A4B Q4_K_M | 72.5 t/s | 271 t/s | 2.8 s | **Don't.** Same model, slower quant — `26b-q4` is ~47% faster and 3 GB smaller. |
-| `qwen-35b` &nbsp;Qwen 3.6 35B-A3B | 70.5 t/s | 180 t/s | 2.7 s | Works, but the [MLX project](https://github.com/Upinel/UpinelAIOS-MLX) runs this same model faster. |
-| `e4b` &nbsp;Gemma 4 E4B | 63.9 t/s | 84 t/s | 0.4 s | Only when the Mac genuinely cannot fit `26b-q4`. |
-| `12b` &nbsp;Gemma 4 12B | 54.5 t/s | 81 t/s | 2.6 s | The largest model that still fits a **16 GB** Mac. `e2b` is nearly twice as fast, so pick it for capability, not speed. |
-| `qwen-9b` &nbsp;Qwen 3.8 9B | 44.3 t/s | 130 t/s | 4.1 s | Use the **MLX** build instead — ~47% faster there. |
-| `qwen-27b` &nbsp;Qwen 3.8 27B | 13.5 t/s | 133 t/s | 9.1 s | Use the **MLX** build instead — ~2.6× faster there. |
+| **`gguf-g-26ba4b`** &nbsp;Gemma 4 26B-A4B Q4_0 QAT | **106.4 t/s** | 98 t/s | 1.1 s | **The default, and the fastest thing here.** MoE with ~4B active per token; this is the build the whole project is tuned around. |
+| `gguf-g-e2b` &nbsp;Gemma 4 E2B | 99.9 t/s | 294 t/s | 1.7 s | The snappy one: fastest prefill, smallest footprint, for a small Mac or quick replies. |
+| `gguf-g-26ba4b-q4km` &nbsp;Gemma 4 26B-A4B Q4_K_M | 72.5 t/s | 271 t/s | 2.8 s | **Don't.** Same model, slower quant — `gguf-g-26ba4b` is ~47% faster and 3 GB smaller. |
+| `gguf-q-35ba3b` &nbsp;Qwen 3.6 35B-A3B | 70.5 t/s | 180 t/s | 2.7 s | Works, but the [MLX project](https://github.com/Upinel/UpinelAIOS-MLX) runs this same model faster. |
+| `gguf-g-e4b` &nbsp;Gemma 4 E4B | 63.9 t/s | 84 t/s | 0.4 s | Only when the Mac genuinely cannot fit `gguf-g-26ba4b`. |
+| `gguf-g-12b` &nbsp;Gemma 4 12B | 54.5 t/s | 81 t/s | 2.6 s | The largest model that still fits a **16 GB** Mac. `gguf-g-e2b` is nearly twice as fast, so pick it for capability, not speed. |
+| `gguf-q-9b` &nbsp;Qwen 3.8 9B | 44.3 t/s | 130 t/s | 4.1 s | Use the **MLX** build instead — ~47% faster there. |
+| `gguf-q-27b` &nbsp;Qwen 3.8 27B | 13.5 t/s | 133 t/s | 9.1 s | Use the **MLX** build instead — ~2.6× faster there. |
 
-**The default is also the fastest, which is the point.** `26b-q4` leads on decode
+**The default is also the fastest, which is the point.** `gguf-g-26ba4b` leads on decode
 at 106 t/s while being a 26B parameter model: it is Google's quantization-aware
 Q4_0 release of a mixture-of-experts checkpoint, so it reads only ~4B active
 parameters per token and stays small enough (15 GB) to leave room for a long
@@ -614,10 +614,10 @@ has roughly a quarter of an M5 Pro's bandwidth. Order-of-magnitude:
 
 | model | estimated decode on M1 |
 |---|---:|
-| `e2b` | ~25 t/s |
-| `e4b` | ~15 t/s |
+| `gguf-g-e2b` | ~25 t/s |
+| `gguf-g-e4b` | ~15 t/s |
 
-Even the pessimistic end is a usable agent endpoint, and `e2b` at 4.2 GB is the
+Even the pessimistic end is a usable agent endpoint, and `gguf-g-e2b` at 4.2 GB is the
 right pick for an 8 GB Air.
 
 #### M5 Neural Accelerators: nearly 2× the prefill, free

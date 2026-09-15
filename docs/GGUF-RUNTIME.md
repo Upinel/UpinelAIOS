@@ -65,7 +65,7 @@ way is caught too. `model_draft_gguf` and `draft_needs_patched_runtime` in
 Built 2026-08 on the reference machine and measured before and after. This is
 the whole picture, including the part that is worse:
 
-**Qwen 27B (`qwen-27b`), same prompts, greedy-ish, median of five:**
+**Qwen 27B (`gguf-q-27b`), same prompts, greedy-ish, median of five:**
 
 | runtime | draft | decode | acceptance |
 |---|---|---:|---:|
@@ -83,7 +83,7 @@ worth re-measuring rather than assuming.
 So the honest number is **2.0x, 7.6 → 15.4 t/s**, not the ~3x the MTPLX side
 gets. Real, but short of what MTP achieves on Metal through MLX.
 
-**Gemma 26B-A4B (`26b-q4`), `llama-bench`, same machine:**
+**Gemma 26B-A4B (`gguf-g-26ba4b`), `llama-bench`, same machine:**
 
 | runtime | prefill | decode |
 |---|---:|---:|
@@ -164,9 +164,9 @@ they are:
 
 | model | shape | active per token | decode here (GGUF) | MLX |
 |---|---|---:|---:|---:|
-| `26b-q4` (Gemma 4) | MoE, 8 of 128 experts | ~4B | **106.4 t/s** | — |
-| `qwen-9b` | dense | 9B | 44.3 t/s | 65.1 t/s |
-| `qwen-27b` | dense | 27B | 13.5 t/s | 34.7 t/s |
+| `gguf-g-26ba4b` (Gemma 4) | MoE, 8 of 128 experts | ~4B | **106.4 t/s** | — |
+| `gguf-q-9b` | dense | 9B | 44.3 t/s | 65.1 t/s |
+| `gguf-q-27b` | dense | 27B | 13.5 t/s | 34.7 t/s |
 
 If you want Qwen 27B speed, the honest answer is the **MLX project**: MTPLX's
 MTP implementation works on Metal and llama.cpp's does not, which is the single
