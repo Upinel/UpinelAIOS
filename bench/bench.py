@@ -38,30 +38,40 @@ FILLER = (
 )
 
 
-def _prompt_for_tokens(n_tokens: int) -> str:
+def _prompt_for_tokens(n_tokens: int, nonce: str = "") -> str:
     """Build a prompt of roughly n_tokens tokens.
 
     The instruction deliberately asks for a long, unbroken continuation: a
     prompt that invites a one-word answer makes the model stop after a couple
     of tokens, and a decode rate measured over 5 tokens is noise.
+
+    ``nonce`` is prepended so that no two runs share a prefix. This is not
+    cosmetic. Servers cache the KV of a shared prefix, so repeating an
+    identical prompt measures the cache rather than the prefill: the same 8k
+    prompt measured 1,985 t/s cold and 36,077 t/s on the second run, an 18x
+    difference with nothing to do with how fast the machine can prefill. It
+    goes at the very front, because a nonce anywhere else leaves the cached
+    prefix intact.
     """
     header = (
         "Continue the following narrative in a single unbroken run of prose. "
         "Do not stop early, do not summarise, and do not ask questions. "
         "Keep writing until you are told to stop.\n\n"
     )
+    stamp = f"[run {nonce}]\n" if nonce else ""
     # This prose tokenises at ~5.5 characters/token, not the usual 4, so a
     # 4-chars-per-token estimate undershoots the requested context by ~30%.
-    body_chars = max(0, int(n_tokens * 5.5) - len(header))
+    body_chars = max(0, int(n_tokens * 5.5) - len(header) - len(stamp))
     reps = max(1, body_chars // len(FILLER))
-    return header + FILLER * reps
+    return stamp + header + FILLER * reps
 
 
-def run_case(url, model, context, max_tokens, api_key, timeout, quiet=False):
+def run_case(url, model, context, max_tokens, api_key, timeout, quiet=False,
+             nonce=""):
     payload = {
         "model": model,
         "messages": [
-            {"role": "user", "content": _prompt_for_tokens(context)},
+            {"role": "user", "content": _prompt_for_tokens(context, nonce)},
         ],
         "max_tokens": max_tokens,
         "temperature": 1.0,      # the model's own recommended sampling
@@ -191,8 +201,11 @@ def main():
     for ctx in contexts:
         runs = []
         for i in range(args.repeats):
+            # Unique per run, so a repeat is a genuine repeat and not a cache
+            # hit. See _prompt_for_tokens().
+            nonce = f"{ctx}-{i}-{time.time_ns()}"
             r = run_case(args.url, args.model, ctx, args.max_tokens, key,
-                         args.timeout, quiet=args.json)
+                         args.timeout, quiet=args.json, nonce=nonce)
             if not r["ok"]:
                 if not args.json:
                     print(f"  context~{ctx:>7}  FAILED: {r['error']}")

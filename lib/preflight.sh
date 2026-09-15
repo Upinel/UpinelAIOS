@@ -389,7 +389,7 @@ model_note() {
     gguf-q-9b)       echo "dense 9B, ~44 t/s - the MLX build is ~47% faster on this model" ;;
     gguf-q-35ba3b)   echo "MoE like the default, different family (Qwen 3.6, not 3.8)" ;;
     # ── MLX ──
-    mlx-q-35ba3b)    echo "35B MoE, ~3B active - fastest Qwen here (~79 t/s), best agent balance" ;;
+    mlx-q-35ba3b)    echo "35B MoE, ~3B active - fastest Qwen here (~98 t/s), best agent balance" ;;
     mlx-q-27b-4bit)  echo "dense 27B 4-bit - the quality pick (~35 t/s)" ;;
     mlx-q-27b-6bit)  echo "dense 27B 6-bit - closer to the original weights, slower" ;;
     mlx-q-27b-3bit)  echo "dense 27B at 3-bit - smallest 27B, some quality loss" ;;

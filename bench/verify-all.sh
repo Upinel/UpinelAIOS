@@ -38,6 +38,7 @@ QUICK=0
 SUITES="
 bench/verify-legacy-aliases.py
 bench/verify-engine-suggest.py
+bench/verify-bench-prompt.py
 bench/verify-model-picker.py
 bench/verify-quant-select.py
 bench/verify-draft-select.py

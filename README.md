@@ -234,14 +234,14 @@ to decide.
 | | engine | what it is for | best decode |
 |---|---|---|---:|
 | ![GGUF](https://img.shields.io/badge/GGUF-llama.cpp-F2B93B?style=flat-square) | llama.cpp | Gemma 4 at peak speed, plus vision | **106 t/s** |
-| ![MLX](https://img.shields.io/badge/MLX-MTPLX-B9A5FF?style=flat-square) | MLX / MTPLX | anything Qwen — up to **2.6×** llama.cpp on the same model | **79 t/s** |
+| ![MLX](https://img.shields.io/badge/MLX-MTPLX-B9A5FF?style=flat-square) | MLX / MTPLX | anything Qwen — up to **2.6×** llama.cpp on the same model | **98 t/s** |
 
 `./install.sh` recommends one model from **each** engine — the fastest in that
 engine this Mac can actually load — and lets you choose:
 
 ```
   1  GGUF gguf-g-26ba4b     15 GB  uncensored MoE, 3B active - 106 t/s
-  2  MLX  mlx-q-35ba3b      22 GB  35B MoE - fastest Qwen (~79 t/s)
+  2  MLX  mlx-q-35ba3b      22 GB  35B MoE - fastest Qwen (~98 t/s)
   3  both                       install both engines and both models
   4  your                       your own Hugging Face repo (owner/name)
 ```
@@ -281,20 +281,33 @@ know the rule. The same thing works non-interactively:
 Every alias is `{engine}-{family}-{size}`, so the runtime is visible at a glance
 and a new model cannot be added without declaring one:
 
-| alias | engine | model | decode |
-|---|---|---|---:|
-| **`gguf-g-26ba4b`** | GGUF | Gemma 4 26B-A4B Q4_0 QAT — **the default** | **106.4 t/s** |
-| `gguf-g-e2b` | GGUF | Gemma 4 E2B — snappiest first token | 99.9 t/s |
-| `gguf-g-12b` | GGUF | Gemma 4 12B — largest that fits a 16 GB Mac | 54.5 t/s |
-| `gguf-g-31b` | GGUF | Gemma 4 31B heretic — highest quality dense | — |
-| `gguf-g-e4b` | GGUF | Gemma 4 E4B — only if `26ba4b` will not fit | 63.9 t/s |
-| **`mlx-q-35ba3b`** | **MLX** | Qwen 3.6 35B-A3B MoE — **the MLX default** | **79.4 t/s** |
-| `mlx-q-27b-4bit` | MLX | Qwen 3.8 27B dense — the quality pick | 34.7 t/s |
-| `mlx-q-9b` | MLX | Qwen 3.8 9B — only when memory is tight | 65.1 t/s |
-| `gguf-q-27b` / `gguf-q-9b` / `gguf-q-35ba3b` | GGUF | the same Qwen models through llama.cpp | — |
+| alias | engine | model | decode | prefill |
+|---|---|---|---:|---:|
+| **`gguf-g-26ba4b`** | GGUF | Gemma 4 26B-A4B Q4_0 QAT — **the default** | **106.4 t/s** | 98 t/s |
+| `gguf-g-e2b` | GGUF | Gemma 4 E2B — snappiest first token | 99.9 t/s | 294 t/s |
+| `gguf-g-12b` | GGUF | Gemma 4 12B — largest that fits a 16 GB Mac | 54.5 t/s | 81 t/s |
+| `gguf-g-31b` | GGUF | Gemma 4 31B heretic — highest quality dense | — | — |
+| `gguf-g-e4b` | GGUF | Gemma 4 E4B — only if `26ba4b` will not fit | 63.9 t/s | 84 t/s |
+| **`mlx-q-35ba3b`** | **MLX** | Qwen 3.6 35B-A3B MoE — **the MLX default** | **~98 t/s** | **~1,520 t/s** |
+| `mlx-q-27b-4bit` | MLX | Qwen 3.8 27B dense — the quality pick | 34.7 t/s | — |
+| `mlx-q-9b` | MLX | Qwen 3.8 9B — only when memory is tight | 65.1 t/s | — |
+| `gguf-q-27b` / `gguf-q-9b` / `gguf-q-35ba3b` | GGUF | the same Qwen models through llama.cpp | — | — |
 
 Measured on an M5 Pro. Old aliases (`26b-q4`, `moe`, `4bit`, …) still work, with
 a warning naming the replacement.
+
+> **A correction on MLX prefill.** These tables used to report **32 t/s** prefill
+> for `mlx-q-35ba3b`, roughly 47× too low. It was a measurement artifact, not a
+> property of the engine: the benchmark reused one prompt, so every run after
+> the first hit the server's prefix cache and measured the cache instead of the
+> work. Prefill for that model measures **~500 t/s at 512 tokens and ~1,520 t/s
+> at 8k, cold** — the first number is what a short prompt costs, the second is
+> the rate once the batch is big enough to saturate the GPU.
+>
+> `bench.py --repeats` was the cause and is fixed: each repeat now sends a
+> unique prompt so it cannot be served from cache. If you have numbers from
+> before, re-measure — warm and cold prefill differ by ~18× here, and only one
+> of those numbers describes loading a prompt.
 
 ### Models: uncensored only
 

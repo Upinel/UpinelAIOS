@@ -62,6 +62,14 @@ its tags; it is simply no longer the thing to clone.
   before. Anything you scripted against `./start.sh --model 4bit` keeps working:
   `4bit`, `6bit`, `27b-3bit`, `27b-4bit`, `9b` and `moe` all still resolve, and
   `27b-4bit` still means the barozp build rather than the itrejomx one.
+- **One number here was wrong.** This edition's README reported **32 t/s**
+  prefill for the 35B MoE. That is ~47× below the real figure and was a
+  measurement artifact, not a property of MLX: the benchmark reused one prompt,
+  so every run after the first hit the server's prefix cache. `mlx-q-35ba3b`
+  measures **~500 t/s at 512 tokens and ~1,520 t/s at 8k, cold**. The bug is
+  fixed in the merged repo's `bench.py`, which now sends a unique prompt per
+  repeat. If you quoted the old number, it is worth correcting.
+
 - **Licence** — the same [Upinel Personal Free License](LICENSE), byte-identical
   (`SHA-256 0906eccc1ebc7e22f8de876997a4f33b7b85c3516d2c5a28796aad759fde7ff7`).
   Free personal use, free for creators, other commercial use by written
