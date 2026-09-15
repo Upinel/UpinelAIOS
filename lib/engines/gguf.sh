@@ -54,7 +54,10 @@ engine_tunable() { return 0; }
 
 # Nothing to install beyond the binary itself. LLAMA_SERVER in env.conf may
 # point at a patched build for models whose draft head needs it.
-engine_setup() { :; }
+# llama-server takes the weights directly; MTPLX needs the "serve" subcommand.
+# Declared empty rather than left undefined so start.sh's $SERVE_WORD use is
+# visibly correct for both engines instead of relying on a missing function.
+engine_serve_word() { :; }
 
 # ── model on disk ────────────────────────────────────────────────────────────
 # A GGUF model directory is usable when it holds a main weights file. Draft
@@ -75,6 +78,44 @@ engine_model_summary() {
   main="$(engine_main_file "$dir")"
   [[ -n "$main" ]] || { echo "incomplete"; return 0; }
   echo "$(basename "$main")"
+}
+
+# Facts the dashboard needs about the model on disk. Sets, in the caller:
+#   STATUS_MAIN        path to the weight file, or empty
+#   STATUS_WEIGHTS_GB  its size in GB
+#   STATUS_VISION_GB   size of the projector, or 0
+#
+# GGUF has a single weight file and an optional projector. MLX has a shard set
+# and no projector, so it fills nothing - reporting zeros is more honest than
+# reporting blank panels, and the dashboard says "not applicable" either way.
+engine_status_extras() {
+  local dir="$1" mm
+  STATUS_MAIN="$(model_main_gguf "$dir" 2>/dev/null || true)"
+  if [[ -n "$STATUS_MAIN" ]]; then
+    STATUS_WEIGHTS_GB=$(( $(stat -f%z "$STATUS_MAIN" 2>/dev/null || echo 0) / 1000000000 ))
+  fi
+  mm="$(model_mmproj_gguf "$dir" 2>/dev/null || true)"
+  if [[ -n "$mm" ]]; then
+    STATUS_VISION_GB=$(( $(stat -f%z "$mm" 2>/dev/null || echo 0) / 1000000000 ))
+  fi
+}
+
+# What to report about a freshly fetched model, beyond "it downloaded".
+#
+# Engine-specific on purpose: model_download.sh used to run these checks for
+# every model regardless of engine, so an MLX pack was told it would "run
+# autoregressive only" because it has no GGUF mmproj - a warning about a file
+# the engine does not use, on a model whose MTP was working fine.
+engine_post_fetch_notes() {
+  local dir="$1"
+  if [[ -n "$(model_mmproj_gguf "$dir" || true)" ]]; then
+    ok "Vision projector present."
+  fi
+  if [[ -n "$(model_draft_gguf "$dir" || true)" ]]; then
+    ok "Speculative draft present - expect a real speedup."
+  else
+    warn "No draft file: this model runs autoregressive only."
+  fi
 }
 
 # ── command line ─────────────────────────────────────────────────────────────

@@ -199,14 +199,11 @@ download_one() {
   else
     warn "Downloaded, but the model looks incomplete for $(engine_name) in $dir"
   fi
-  if [[ -n "$(model_mmproj_gguf "$dir" || true)" ]]; then
-    ok "Vision projector present."
-  fi
-  if [[ -n "$(model_draft_gguf "$dir" || true)" ]]; then
-    ok "Speculative draft present - expect a solid speedup."
-  else
-    warn "No draft file; this model will run autoregressive only."
-  fi
+  # What counts as an extra depends on the engine, so the engine reports it.
+  # These checks used to be inline and GGUF-only, which meant every MLX pack
+  # was told it had no draft file and would run autoregressive - a warning
+  # about a file MLX does not use, on models whose MTP worked.
+  engine_post_fetch_notes "$dir"
 }
 
 switch_to() {

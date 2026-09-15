@@ -234,7 +234,7 @@ to decide.
 | | engine | what it is for | best decode |
 |---|---|---|---:|
 | ![GGUF](https://img.shields.io/badge/GGUF-llama.cpp-F2B93B?style=flat-square) | llama.cpp | Gemma 4 at peak speed, plus vision | **106 t/s** |
-| ![MLX](https://img.shields.io/badge/MLX-MTPLX-B9A5FF?style=flat-square) | MLX / MTPLX | anything Qwen — up to **2.6×** llama.cpp on the same model | **98 t/s** |
+| ![MLX](https://img.shields.io/badge/MLX-MTPLX-B9A5FF?style=flat-square) | MLX / MTPLX | anything Qwen — up to **2.2×** llama.cpp on the same model | **98 t/s** |
 
 `./install.sh` recommends one model from **each** engine — the fastest in that
 engine this Mac can actually load — and lets you choose:
@@ -289,25 +289,36 @@ and a new model cannot be added without declaring one:
 | `gguf-g-31b` | GGUF | Gemma 4 31B heretic — highest quality dense | — | — |
 | `gguf-g-e4b` | GGUF | Gemma 4 E4B — only if `26ba4b` will not fit | 63.9 t/s | 84 t/s |
 | **`mlx-q-35ba3b`** | **MLX** | Qwen 3.6 35B-A3B MoE — **the MLX default** | **~98 t/s** | **~1,520 t/s** |
-| `mlx-q-27b-4bit` | MLX | Qwen 3.8 27B dense — the quality pick | 34.7 t/s | — |
-| `mlx-q-9b` | MLX | Qwen 3.8 9B — only when memory is tight | 65.1 t/s | — |
+| `mlx-q-27b-4bit` | MLX | Qwen 3.8 27B dense — the quality pick | ~30 t/s | ~330 t/s |
+| `mlx-q-9b` | MLX | Qwen 3.8 9B — only when memory is tight | ~90 t/s | ~1,390 t/s |
 | `gguf-q-27b` / `gguf-q-9b` / `gguf-q-35ba3b` | GGUF | the same Qwen models through llama.cpp | — | — |
 
 Measured on an M5 Pro. Old aliases (`26b-q4`, `moe`, `4bit`, …) still work, with
 a warning naming the replacement.
 
-> **A correction on MLX prefill.** These tables used to report **32 t/s** prefill
-> for `mlx-q-35ba3b`, roughly 47× too low. It was a measurement artifact, not a
-> property of the engine: the benchmark reused one prompt, so every run after
-> the first hit the server's prefix cache and measured the cache instead of the
-> work. Prefill for that model measures **~500 t/s at 512 tokens and ~1,520 t/s
-> at 8k, cold** — the first number is what a short prompt costs, the second is
-> the rate once the batch is big enough to saturate the GPU.
+> **Every MLX figure above was re-measured.** The tables used to report **32 t/s**
+> prefill for `mlx-q-35ba3b`, roughly 47× too low. That was a measurement
+> artifact, not a property of the engine: the benchmark reused one prompt, so
+> every run after the first hit the server's prefix cache and measured the cache
+> instead of the work. `bench.py --repeats` caused it and is fixed — each repeat
+> now sends a unique prompt.
 >
-> `bench.py --repeats` was the cause and is fixed: each repeat now sends a
-> unique prompt so it cannot be served from cache. If you have numbers from
-> before, re-measure — warm and cold prefill differ by ~18× here, and only one
-> of those numbers describes loading a prompt.
+> Re-measuring with that fixed changed all three models, in both directions:
+>
+> | model | decode was | decode now | prefill was | prefill now |
+> |---|---:|---:|---:|---:|
+> | `mlx-q-35ba3b` | 79.4 | **~98** | 32 | **~1,520** |
+> | `mlx-q-27b-4bit` | 34.7 | **~30** | — | **~330** |
+> | `mlx-q-9b` | 65.1 | **~90** | — | **~1,390** |
+>
+> Prefill scales with prompt size — about 500 t/s at 512 tokens against 1,520 at
+> 8k on the 35B — because a short batch cannot saturate the GPU. The figures
+> here are at **8k context**, which is what an agent actually pays, with
+> `max_tokens 128` and a cold (never-cached) prompt.
+>
+> The old numbers also overstated the engine gap: the best ratio measured
+> against llama.cpp on the same model is **2.2×** (the 27B), not the 2.6× these
+> docs used to claim. That claim is corrected throughout.
 
 ### Models: uncensored only
 
@@ -672,7 +683,7 @@ token. Every model below is uncensored.
 | `gguf-g-e4b` &nbsp;Gemma 4 E4B | 63.9 t/s | 84 t/s | 0.4 s | Only when the Mac genuinely cannot fit `gguf-g-26ba4b`. |
 | `gguf-g-12b` &nbsp;Gemma 4 12B | 54.5 t/s | 81 t/s | 2.6 s | The largest model that still fits a **16 GB** Mac. `gguf-g-e2b` is nearly twice as fast, so pick it for capability, not speed. |
 | `gguf-q-9b` &nbsp;Qwen 3.8 9B | 44.3 t/s | 130 t/s | 4.1 s | Use the **MLX** build instead — ~47% faster there. |
-| `gguf-q-27b` &nbsp;Qwen 3.8 27B | 13.5 t/s | 133 t/s | 9.1 s | Use the **MLX** build instead — ~2.6× faster there. |
+| `gguf-q-27b` &nbsp;Qwen 3.8 27B | 13.5 t/s | 133 t/s | 9.1 s | Use the **MLX** build instead — ~2.2× faster there. |
 
 **The default is also the fastest, which is the point.** `gguf-g-26ba4b` leads on decode
 at 106 t/s while being a 26B parameter model: it is Google's quantization-aware

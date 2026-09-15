@@ -83,7 +83,7 @@ fi
 # ── which engine, and therefore which model ──────────────────────────────────
 # The hardware scan above recommends settings. The engine is a separate
 # question, and not one to answer on the user's behalf: GGUF and MLX are
-# different offers - Gemma at peak decode versus Qwen up to 2.6x faster - so
+# different offers - Gemma at peak decode versus Qwen up to 2.2x faster - so
 # both are shown with the measured reason to want each.
 #
 # Skipped when the model was named explicitly, when --yes was given, or when
@@ -168,7 +168,7 @@ if [[ -z "$MODEL_OVERRIDE" ]] && (( DO_SCAN )) && (( ! ASSUME_YES )); then
       fi
       log ""
       log "  ${C_DIM}1 is the fastest decode measured here (106 t/s). 2 is the best"
-      log "  agent balance for Qwen, and up to 2.6x llama.cpp on the same model."
+      log "  agent balance for Qwen, and up to 2.2x llama.cpp on the same model."
       log "  3 costs about $((${REC_GGUF_WEIGHTS} + ${REC_MLX_WEIGHTS})) GB of disk.${C_RESET}"
       log ""
 
@@ -281,7 +281,7 @@ if (( DO_DEPS )); then
       log "  ${C_DIM}$(engine_name) is not installed. It would add roughly 1-2 GB and"
       log "  lets you run the other half of the model list:${C_RESET}"
       log "  ${C_DIM}  gguf: Gemma 4 at peak speed, vision${C_RESET}"
-      log "  ${C_DIM}  mlx:  anything Qwen, up to 2.6x faster than llama.cpp${C_RESET}"
+      log "  ${C_DIM}  mlx:  anything Qwen, up to 2.2x faster than llama.cpp${C_RESET}"
       log ""
       if ask_yes_no "Install $(engine_name) as well?" n; then
         engine_install
@@ -364,15 +364,10 @@ if (( DO_MODEL )); then
     warn "The download looks incomplete for $(engine_name)."
     warn "Re-run ./model_download.sh ${MODEL_ALIAS:-$MODEL_REPO} to finish it."
   fi
-  # GGUF extras: a projector, and a draft head that turns MTP on.
-  if [[ "$ENGINE" == "gguf" ]]; then
-    [[ -n "$(model_mmproj_gguf "$MODEL_DIR" || true)" ]] && ok "Vision projector present."
-    if [[ -n "$(model_draft_gguf "$MODEL_DIR" || true)" ]]; then
-      ok "Speculative draft present - expect a real speedup."
-    else
-      warn "No draft file: this model runs autoregressive only."
-    fi
-  fi
+  # Extras that decide whether the model is fast or merely working - a
+  # projector, a draft head, an MTP head. Which of those exist is engine
+  # knowledge, so the engine reports it rather than this script guessing.
+  engine_post_fetch_notes "$MODEL_DIR"
 else
   step "Skipping model download"
 fi

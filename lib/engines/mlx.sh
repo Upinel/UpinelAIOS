@@ -53,7 +53,6 @@ engine_install() {
 engine_tunable() { return 1; }
 
 # MTPLX bootstraps a Python runtime on first use.
-engine_setup() { :; }
 
 # ── model on disk ────────────────────────────────────────────────────────────
 # An MLX pack is a tree of safetensors shards, not one file. Completeness is
@@ -73,6 +72,31 @@ engine_model_summary() {
   local dir="$1" gb
   gb="$(model_dir_gb "$dir" 2>/dev/null || echo 0)"
   if [[ "${gb:-0}" == "0" ]]; then echo "incomplete"; else echo "${gb} GB"; fi
+}
+
+# MLX packs are a shard set with no single weight file and no projector, so
+# there is nothing here to report. The dashboard shows "not applicable" for
+# both rather than inventing a number.
+engine_status_extras() { :; }
+
+# What to report about a freshly fetched pack.
+#
+# MTPLX reads its own runtime metadata, so the useful question is whether the
+# pack ships an MTP head at all rather than whether it has a GGUF draft file.
+# Every Qwen pack here has mtp.safetensors; the runtime json is what MTPLX
+# needs alongside it.
+engine_post_fetch_notes() {
+  local dir="$1"
+  [[ -f "$dir/mtplx_runtime.json" ]] || \
+    warn "No mtplx_runtime.json: MTPLX may refuse this pack."
+  if [[ -f "$dir/mtp.safetensors" ]]; then
+    ok "MTP head present - MTPLX speculative decoding is available."
+  else
+    warn "No mtp.safetensors: this pack runs without MTP speculation."
+  fi
+  if [[ -f "$dir/vision_tower.safetensors" ]]; then
+    ok "Vision tower present."
+  fi
 }
 
 # ── command line ─────────────────────────────────────────────────────────────

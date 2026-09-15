@@ -67,7 +67,7 @@ show_usage() {
 #   engine   runtime          what it is best at
 #   ------   ---------------  ------------------------------------------------
 #   gguf     llama.cpp        Gemma 4 at peak speed; vision; 100+ t/s
-#   mlx      MLX / MTPLX      anything Qwen - up to 2.6x faster than llama.cpp
+#   mlx      MLX / MTPLX      anything Qwen - up to 2.2x faster than llama.cpp
 #
 # ── GGUF (llama.cpp) ─────────────────────────────────────────────────────────
 #   26b-q4       MoE, Q4_0 QAT. FASTEST 26B - default. See below.

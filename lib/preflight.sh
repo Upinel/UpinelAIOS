@@ -37,9 +37,18 @@ scan_hardware() {
   [[ -n "${HW_FREE_GB:-}" ]] || HW_FREE_GB=0
 
   # Is the model already on disk?
+  #
+  # Engine-aware. Asking model_main_gguf() about an MLX pack always answers no,
+  # so the scan reported an MLX model as missing and then demanded free disk
+  # space for a download that had already happened - and refused to continue
+  # when the volume was full, which is exactly the case where the user is
+  # already installed and has nothing left to download.
   HW_MODEL_PRESENT="no"
-  if [[ -n "$(model_main_gguf "$MODEL_DIR" 2>/dev/null || true)" ]]; then
-    HW_MODEL_PRESENT="yes"
+  if [[ -n "${MODEL_REPO:-}" && -d "${MODEL_DIR:-}" ]]; then
+    load_engine "$(model_engine_for "$MODEL_REPO" 2>/dev/null || echo gguf)"       >/dev/null 2>&1 || true
+    if engine_model_ok "$MODEL_DIR" 2>/dev/null; then
+      HW_MODEL_PRESENT="yes"
+    fi
   fi
   HW_WEIGHTS_GB="$(model_weights_gb)"
 
@@ -87,7 +96,7 @@ print_hardware() {
 # EACH rather than pick one on the user's behalf: they are not the same offer.
 #
 #   gguf  llama.cpp   Gemma 4 at peak decode - 106 t/s measured - and vision
-#   mlx   MTPLX       anything Qwen; up to 2.6x llama.cpp on the same model
+#   mlx   MTPLX       anything Qwen; up to 2.2x llama.cpp on the same model
 #
 # Both are judged with model_fit(), so the same memory arithmetic decides both
 # and neither can recommend something this Mac cannot load.
@@ -385,7 +394,7 @@ model_note() {
     gguf-g-31b)      echo "dense 31B abliterated - the highest quality, and the slowest" ;;
     gguf-g-e4b)      echo "loses to both e2b and the 26B on every axis" ;;
     gguf-g-e2b)      echo "smallest, and the fastest small model: fits an 8 GB Mac" ;;
-    gguf-q-27b)      echo "dense 27B, ~13.5 t/s; its MTP head needs a build step - or use the MLX build (~2.6x faster)" ;;
+    gguf-q-27b)      echo "dense 27B, ~13.5 t/s; its MTP head needs a build step - or use the MLX build (~2.2x faster)" ;;
     gguf-q-9b)       echo "dense 9B, ~44 t/s - the MLX build is ~47% faster on this model" ;;
     gguf-q-35ba3b)   echo "MoE like the default, different family (Qwen 3.6, not 3.8)" ;;
     # ── MLX ──

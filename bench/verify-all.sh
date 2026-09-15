@@ -40,6 +40,7 @@ bench/verify-legacy-aliases.py
 bench/verify-engine-suggest.py
 bench/verify-bench-prompt.py
 bench/verify-kv-table.py
+bench/verify-engine-contract.py
 bench/verify-model-picker.py
 bench/verify-quant-select.py
 bench/verify-draft-select.py

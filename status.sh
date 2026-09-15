@@ -41,9 +41,18 @@
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/common.sh"
 load_config
 
-# Which engine is configured. Everything below that behaves differently per
-# runtime - chiefly --thinking - branches on this.
+# Which model is being served, and therefore which engine.
+#
+# env.conf is the configured model, but ./start.sh --model serves a different
+# one for a single run without touching env.conf. Reporting the configured
+# model while another is running would put the wrong weights, the wrong KV
+# figure and the wrong engine on the dashboard - so when a server has written
+# a launch snapshot, that is what is actually running and it wins.
 STATUS_REPO="$(model_repo_for "$MODEL")"
+if [[ -f "$CONFIG_SNAPSHOT_FILE" ]]; then
+  _launched="$(sed -n 's/^MODEL=//p' "$CONFIG_SNAPSHOT_FILE" 2>/dev/null | head -1)"
+  [[ -n "$_launched" ]] && STATUS_REPO="$_launched"
+fi
 STATUS_ALIAS="$(alias_for_repo "$STATUS_REPO")"
 STATUS_ENGINE="$(model_engine_for "${STATUS_ALIAS:-$STATUS_REPO}")"
 [[ -n "$STATUS_ENGINE" ]] || STATUS_ENGINE="$(engine_for_dir "$MODELS_DIR/${STATUS_REPO//\//--}")"
@@ -131,19 +140,18 @@ require_bin python3 "python3 is required for the dashboard."
 
 # Hand the configuration to the dashboard as JSON so we keep one source of
 # truth (env.conf) instead of duplicating parsing in Python.
-# Engine-specific facts for the dashboard. A GGUF model has one weight file
-# plus optional extras; an MLX pack has neither, and reporting zeros is more
-# honest than reporting blank panels.
+# Facts about the model on disk, for the dashboard. The engine fills the parts
+# that apply to it - a GGUF model has one weight file and maybe a projector, an
+# MLX pack has neither - so this script does not branch on the engine and
+# cannot fall out of step with it.
 STATUS_MAIN=""; STATUS_WEIGHTS_GB=0; STATUS_KV_GB=0; STATUS_VISION_GB=0
 STATUS_DIR="$MODELS_DIR/${STATUS_REPO//\//--}"
-if [[ "$STATUS_ENGINE" == "gguf" ]]; then
-  STATUS_MAIN="$(model_main_gguf "$STATUS_DIR" 2>/dev/null || true)"
-  [[ -n "$STATUS_MAIN" ]] && STATUS_WEIGHTS_GB=$(( $(stat -f%z "$STATUS_MAIN" 2>/dev/null || echo 0) / 1000000000 ))
-  _kb="$(kv_kb_for_engine "$STATUS_ENGINE")"
-  STATUS_KV_GB=$(( CONTEXT_WINDOW * _kb / 1024 / 1024 ))
-  _mm="$(model_mmproj_gguf "$STATUS_DIR" 2>/dev/null || true)"
-  [[ -n "$_mm" ]] && STATUS_VISION_GB=$(( $(stat -f%z "$_mm" 2>/dev/null || echo 0) / 1000000000 ))
+if load_engine "$STATUS_ENGINE" >/dev/null 2>&1; then
+  engine_status_extras "$STATUS_DIR"
 fi
+# KV is derived from the model's own cost per token, which is engine-aware even
+# when the model files are not present yet.
+STATUS_KV_GB=$(( CONTEXT_WINDOW * $(kv_kb_for_engine "$STATUS_ENGINE") / 1024 / 1024 ))
 
 CONFIG_JSON="$(python3 - <<PY
 import json, os
