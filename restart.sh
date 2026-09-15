@@ -15,6 +15,7 @@
 #
 #   ./restart.sh              graceful stop, then start with the current env.conf
 #   ./restart.sh --model X    switch to a model (and therefore an engine)
+#   ./restart.sh --profile Y  master a workload: speed | agent | writer
 #   ./restart.sh --force      SIGKILL on stop if the graceful path hangs
 #   ./restart.sh --wait 5     extra seconds to let the port and GPU settle
 #   ./restart.sh --print      show what would start, and whether config changed
@@ -36,12 +37,14 @@ FORCE=0
 SETTLE=3
 PRINT_ONLY=0
 MODEL_OVERRIDE=""
+PROFILE_OVERRIDE=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --force)  FORCE=1 ;;
     --wait)   SETTLE="$2"; shift ;;
     --print)  PRINT_ONLY=1 ;;
     --model)  MODEL_OVERRIDE="$2"; shift ;;
+    --profile) PROFILE_OVERRIDE="$2"; shift ;;
     -h|--help) show_usage "$0"; exit 0 ;;
     *) die "Unknown argument: $1  (try --help)" ;;
   esac
@@ -122,16 +125,39 @@ ENGINE_R="$(model_engine_for "${MODEL_ALIAS_R:-$MODEL_REPO_R}")"
 # which is how the profile line came to print an empty string and a
 # "command not found" to stderr.
 load_engine "$ENGINE_R" >/dev/null 2>&1 || true
+# Not computed here: the profile chosen just below can change MTP_DEPTH, and a
+# depth worked out before that is a number about the previous profile. It is
+# filled in after apply_expert_profile(), just before the banner prints it.
+
+# ── which workload to master ─────────────────────────────────────────────────
+if [[ -n "$PROFILE_OVERRIDE" ]]; then
+  case "$PROFILE_OVERRIDE" in
+    speed|agent|writer|custom)
+      EXPERT_PROFILE="$PROFILE_OVERRIDE"
+      set_config_value EXPERT_PROFILE "$EXPERT_PROFILE"
+      info "Profile: $(expert_profile_label "$EXPERT_PROFILE") - $(expert_profile_note "$EXPERT_PROFILE")"
+      ;;
+    *) die "--profile must be one of speed | agent | writer | custom" ;;
+  esac
+elif (( ! PRINT_ONLY )); then
+  choose_expert_profile || true
+fi
+
+# Applied before the banner, so the banner reports what will actually start.
+apply_expert_profile
+
+# Now that the profile has had its say about MTP_DEPTH.
 EFFECTIVE_DEPTH="$(effective_depth 2>/dev/null || echo 3)"
 
 log ""
 log "  ${C_BOLD}Starting with:${C_RESET}"
 log "    engine     $(engine_name 2>/dev/null || echo "$ENGINE_R")"
+log "    profile    $(expert_profile_label "${EXPERT_PROFILE:-speed}")   (expert profile)"
 log "    model      $MODEL_REPO_R${MODEL_ALIAS_R:+   ($MODEL_ALIAS_R)}"
 log "    served as  $SERVED_MODEL_NAME"
 log "    context    $CONTEXT_WINDOW   KV $(kv_quant_for "$ENGINE_R")"
 if [[ "$ENGINE_R" == "mlx" ]]; then
-  log "    profile    $(engine_resolved_profile "$MODELS_DIR/${MODEL_REPO_R//\//--}")   thinking $THINKING   history $PRESERVE_THINKING"
+  log "    runtime    $(engine_resolved_profile "$MODELS_DIR/${MODEL_REPO_R//\//--}")   thinking $THINKING   history $PRESERVE_THINKING"
   log "    memory     ${MEMORY_LIMIT_GB} GB cap   session bank ${SESSION_BANK_GB} GB"
 else
   log "    depth      $EFFECTIVE_DEPTH   thinking $THINKING"

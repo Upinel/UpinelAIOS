@@ -17,6 +17,7 @@
 #   ./start.sh --foreground    run attached to this terminal (Ctrl-C to stop)
 #   ./start.sh --print         print the command it would run, then exit
 #   ./start.sh --model mlx-q-9b   serve a different model for this run only
+#   ./start.sh --profile agent    master a workload: speed | agent | writer
 #
 # The engine is not a setting. A model belongs to exactly one runtime - a GGUF
 # checkpoint can only run on llama.cpp, an MTPLX pack can only run on MTPLX - so
@@ -28,12 +29,13 @@
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/common.sh"
 load_config
 
-FOREGROUND=0; PRINT_ONLY=0; MODEL_OVERRIDE=""
+FOREGROUND=0; PRINT_ONLY=0; MODEL_OVERRIDE=""; PROFILE_OVERRIDE=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -f|--foreground) FOREGROUND=1 ;;
     --print)         PRINT_ONLY=1 ;;
     --model)         MODEL_OVERRIDE="$2"; shift ;;
+    --profile)       PROFILE_OVERRIDE="$2"; shift ;;
     -h|--help)       show_usage "$0"; exit 0 ;;
     *)               die "Unknown argument: $1  (try --help)" ;;
   esac
@@ -63,6 +65,27 @@ if [[ -z "$MODEL_OVERRIDE" ]] && (( ! PRINT_ONLY )); then
     info "Serving $MODEL_REPO for this run. Set MODEL in env.conf to make it permanent."
   fi
 fi
+
+# ── which workload to master ─────────────────────────────────────────────────
+# Asked here rather than left in env.conf because it changes the launch command
+# materially, and which one you want depends on what you are doing today. The
+# answer is saved, so the next start defaults to it.
+if [[ -n "$PROFILE_OVERRIDE" ]]; then
+  case "$PROFILE_OVERRIDE" in
+    speed|agent|writer|custom)
+      EXPERT_PROFILE="$PROFILE_OVERRIDE"
+      set_config_value EXPERT_PROFILE "$EXPERT_PROFILE"
+      info "Profile: $(expert_profile_label "$EXPERT_PROFILE") - $(expert_profile_note "$EXPERT_PROFILE")"
+      ;;
+    *) die "--profile must be one of speed | agent | writer | custom" ;;
+  esac
+elif (( ! PRINT_ONLY )); then
+  choose_expert_profile || true
+fi
+
+# Apply it before the engine reads any of these, or the launch command would be
+# built from the values the profile is about to replace.
+apply_expert_profile
 
 # Re-derive the alias from the repo that is actually being served. The picker
 # sets MODEL_REPO and MODEL_DIR but not MODEL_ALIAS, so without this the engine

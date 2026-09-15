@@ -41,6 +41,35 @@ git clone https://github.com/Upinel/UpinelAIOS && cd UpinelAIOS
 ./chat.sh         # talk to it, right here in the terminal
 ```
 
+### Pick a profile: what should this Mac master?
+
+`./start.sh` and `./restart.sh` ask which workload to master, and remember the
+answer. They are different jobs rather than points on a scale, so the right one
+depends on what you are doing today.
+
+```
+  Which workload should this Mac master?
+
+   1  speed    Max t/s          peak decode; one client, thinking bounded
+   2  agent    Max Agentic AI   tool loops; thinking off, 4 sessions, prefixes kept
+   3  writer   Max Long Writer  long context; shallower drafts, long replies, one client
+   4  custom   Custom           use env.conf exactly as written
+```
+
+| | for | what it changes |
+|---|---|---|
+| **Max t/s** | one client, fastest possible replies | tuned MTP depth, f16 KV, thinking bounded, one session holding the whole GPU |
+| **Max Agentic AI** | a loop of tool calls | thinking **off** so a modest `max_tokens` cannot truncate a call, 4 concurrent sessions, prefix cache kept on disk, room for a full tool call |
+| **Max Long Writer** | novels, long documents | shallower drafting (depth 1) so there is less to verify per cycle as the window fills, thinking off, 8192-token replies, one client |
+
+Skip the question with `./start.sh --profile agent`, or set `EXPERT_PROFILE` in
+`env.conf` and it stops asking. `custom` leaves every setting exactly as you
+wrote it.
+
+A profile only touches the settings it names — **your model, context window and
+memory cap are always kept**, so switching profile never silently changes which
+model you are running or how much memory it may use.
+
 That is the whole quick start. Everything below is detail you can come back to —
 [Requirements](#requirements) if your Mac is small, [Configure it](#configure-it)
 to pick a different model, [Benchmarks](#benchmarks) for the measured numbers.
@@ -85,6 +114,7 @@ Clone it, run `./install.sh`, run `./start.sh`. Nothing else.
 - [Requirements](#requirements)
 - [Quick start](#quick-start)
   - [Chatting from the terminal](#chatting-from-the-terminal)
+- [Pick a profile: what should this Mac master?](#pick-a-profile-what-should-this-mac-master)
 - [Configure it](#configure-it)
   - [Two engines, one server](#two-engines-one-server)
   - [What tuning actually bought](#what-tuning-actually-bought)

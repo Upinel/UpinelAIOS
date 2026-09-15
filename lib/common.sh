@@ -359,6 +359,186 @@ require_macos() {
 # name for a reason: its own notes record the tensor API as ~5% SLOWER on
 # M2 Ultra and neutral on M4/M4 Max. Forcing it on older silicon is a
 # pessimisation, not an optimisation.
+# ── expert profiles ──────────────────────────────────────────────────────────
+# One choice that masters one workload, instead of a dozen settings to
+# reconcile by hand. The three are not points on a scale - they are different
+# jobs, and the measurements say they want different things.
+#
+# Which parts are measured and which are reasoned, because it differs:
+#
+#   measured  f16 KV faster than q8 on both engines, at 8k and at 32k
+#             MTP depth is per-model: the 35B wants 1, the Gemma wants 2
+#             MTP off costs 27% decode; the M5 tensor API is worth 76% prefill
+#   reasoned  thinking off for tool loops and for prose - the project's own
+#             tuning notes say it is faster and removes the truncation risk
+#   reasoned  one client for speed and writing, several for agents
+#
+# What did NOT make it in, because it could not be resolved on this machine:
+# the prefill chunk size at long context, the context window size, and MTP
+# depth at long context. All three measured inside the noise - the same config
+# scored 2,687 and 903 t/s prefill for the same prompt on consecutive loads.
+# Rather than bake in a guess, these stay on the user's setting.
+#
+# f16 KV is in all three profiles, since it won at every context tested.
+EXPERT_PROFILES="speed agent writer"
+
+expert_profile_label() {
+  case "$1" in
+    speed)  echo "Max t/s" ;;
+    agent)  echo "Max Agentic AI" ;;
+    writer) echo "Max Long Writer" ;;
+    custom) echo "Custom" ;;
+    *)      echo "$1" ;;
+  esac
+}
+
+expert_profile_note() {
+  case "$1" in
+    speed)  echo "peak decode; one client, thinking bounded" ;;
+    agent)  echo "tool loops; thinking off, 4 sessions, prefixes kept" ;;
+    writer) echo "long context; shallower drafts, long replies, one client" ;;
+    *)      echo "" ;;
+  esac
+}
+
+# What each profile sets, and what it deliberately leaves alone.
+#
+# Applied after load_config and before the engine builds its command line.
+# Anything named here overrides env.conf; anything else keeps the user's value,
+# which is why context window and model choice are not in the list - those are
+# the user's business, not the profile's.
+apply_expert_profile() {
+  case "${EXPERT_PROFILE:-speed}" in
+    custom) return 0 ;;
+
+    speed)
+      KV_QUANT="f16"                   # measured fastest on both engines
+      MTP_DEPTH="auto"                 # the per-model tuned value
+      PREFILL_CHUNK_TOKENS="auto"
+      THINKING="low"                   # bounded, so it cannot run away
+      PARALLEL_SLOTS=1                 # one client gets the whole GPU
+      MAX_CONCURRENT=1
+      BATCHING_PRESET="solo"
+      SSD_SESSION_CACHE="on"
+      ;;
+
+    agent)
+      KV_QUANT="f16"
+      MTP_DEPTH="auto"
+      PREFILL_CHUNK_TOKENS="auto"
+      # Off is the right setting for a tool loop, not a compromise: thinking is
+      # emitted before the tool call, so a modest max_tokens truncates the call
+      # mid-JSON and the agent reports "missing required property".
+      THINKING="off"
+      PARALLEL_SLOTS=4
+      MAX_CONCURRENT=4
+      BATCHING_PRESET="agent"
+      SSD_SESSION_CACHE="on"           # long shared prefixes, across restarts
+      # A tool call has to fit inside the budget alongside anything the model
+      # thinks first. 512 is not enough for a real file write.
+      if (( ${MAX_RESPONSE_TOKENS:-0} < 4096 )); then
+        MAX_RESPONSE_TOKENS=4096
+      fi
+      ;;
+
+    writer)
+      KV_QUANT="f16"
+      # Shallower drafting. The effect was small and noisy at 32k - depth 1 and
+      # depth 2 traded places between rounds - but depth 1 took the best TTFT in
+      # every round (43.5s against 49.8s at 32k), and time to first token is
+      # what you actually feel when you are writing. Deeper drafting has more
+      # context to verify on every cycle, so the cost grows with the window.
+      MTP_DEPTH="${WRITER_DEPTH:-1}"
+      # Prefill chunk is deliberately NOT set. 2048 measured 14% better in one
+      # comparison and lost in the next; it stays on the user's setting rather
+      # than on a number that did not reproduce.
+      PREFILL_CHUNK_TOKENS="auto"
+      THINKING="off"                   # prose, not deliberation
+      PARALLEL_SLOTS=1
+      MAX_CONCURRENT=1
+      BATCHING_PRESET="solo"
+      SSD_SESSION_CACHE="on"           # a novel is one very long conversation
+      # Chapter-length replies. The cap exists to stop a runaway, not to shape
+      # the writing.
+      if (( ${MAX_RESPONSE_TOKENS:-0} < 8192 )); then
+        MAX_RESPONSE_TOKENS=8192
+      fi
+      ;;
+
+    *)
+      die "EXPERT_PROFILE=\"$EXPERT_PROFILE\" is not one of: custom $EXPERT_PROFILES"
+      ;;
+  esac
+}
+
+# Ask which workload to master. Saves the answer, so the next start defaults to
+# it; Enter or a timeout keeps the current one.
+#
+# Returns 0 when the profile changed, 1 when nothing was chosen - the same
+# contract as the model picker, so callers can treat both the same way.
+choose_expert_profile() {
+  local cur="${EXPERT_PROFILE:-speed}" ans idx=1 p
+
+  [[ -t 0 ]] || return 1
+
+  print_profile_menu
+  printf '  Number [1-%d], or Enter for %s. Auto-selects in %ds: ' \
+         "$(( $(printf '%s\n' $EXPERT_PROFILES | wc -l | tr -d ' ') + 1 ))" \
+         "$(expert_profile_label "$cur")" "$MODEL_PICK_SECONDS"
+
+  ans=""
+  if ! read -r -t "$MODEL_PICK_SECONDS" ans; then
+    log ""
+    info "No answer in ${MODEL_PICK_SECONDS}s - keeping $(expert_profile_label "$cur")."
+    return 1
+  fi
+
+  ans="${ans//[!0-9]/}"
+  [[ -n "$ans" ]] || return 1
+
+  for p in $EXPERT_PROFILES custom; do
+    if (( idx == ans )); then
+      if [[ "$p" == "$cur" ]]; then
+        info "Already on $(expert_profile_label "$p")."
+        return 1
+      fi
+      EXPERT_PROFILE="$p"
+      set_config_value EXPERT_PROFILE "$p"
+      info "Profile: $(expert_profile_label "$p") - $(expert_profile_note "$p")"
+      return 0
+    fi
+    idx=$(( idx + 1 ))
+  done
+
+  warn "No profile number $ans - keeping $(expert_profile_label "$cur")."
+  return 1
+}
+
+# Print the three, with what each is for. Used by start.sh and restart.sh.
+print_profile_menu() {
+  local cur="${EXPERT_PROFILE:-speed}" p n
+  log ""
+  log "  ${C_BOLD}Which workload should this Mac master?${C_RESET}"
+  log ""
+  n=1
+  for p in $EXPERT_PROFILES; do
+    local mark=""
+    [[ "$p" == "$cur" ]] && mark="${C_DIM}<- current${C_RESET}"
+    printf '  %2d  %s%-8s%s %-16s %s%s%s\n' \
+      "$n" "$C_BOLD" "$p" "$C_RESET" "$(expert_profile_label "$p")" \
+      "$C_DIM" "$(expert_profile_note "$p")" "$C_RESET"
+    n=$(( n + 1 ))
+  done
+  printf '  %2d  %s%-8s%s %-16s %s%s%s\n' \
+    "$n" "$C_BOLD" "custom" "$C_RESET" "Custom" \
+    "$C_DIM" "use env.conf exactly as written" "$C_RESET"
+  log ""
+  log "  ${C_DIM}Think of them as different jobs, not a scale: speed is one client at${C_RESET}"
+  log "  ${C_DIM}peak decode, agent is a loop of tool calls, writer is long context.${C_RESET}"
+  log "  ${C_DIM}Your model, context window and RAM cap are kept either way.${C_RESET}"
+  log ""
+}
+
 # ── which chip is this ───────────────────────────────────────────────────────
 # One place that answers it. HW_CHIP comes from the installer's scan; the
 # sysctl fallback covers ./start.sh, which does not scan. Asking sysctl here
