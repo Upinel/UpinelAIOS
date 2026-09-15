@@ -57,10 +57,15 @@ dropping them silently.
 
 ```bash
 git switch main
-grep -rn "UpinelAIOS-GGUF" --include="*.sh" --include="*.py" --include="*.md" --include="*.conf" . | grep -v '^./.git/'
+grep -rn "UpinelAIOS-GGUF" --include="*.sh" --include="*.py" --include="*.md" --include="*.conf" . \
+  | grep -v '^./.git/' | grep -v '^./migration/CUTOVER.md:'
 ```
 
 Expect **no output**. Any hit is a stale identity that survived the merge.
+
+`migration/CUTOVER.md` is excluded because it is this file: it has to name the
+old repo to explain the rename, so it matches itself. Without that exclusion
+this check reports hits forever and stops meaning anything.
 
 ```bash
 grep -n 'SERVED_MODEL_NAME' env.conf lib/common.sh
@@ -151,7 +156,8 @@ git pull
 
 # Identity
 grep -n "SERVED_MODEL_NAME" env.conf lib/common.sh
-grep -rn "UpinelAIOS-GGUF" --include="*.md" --include="*.sh" . | grep -v '^./.git/'
+grep -rn "UpinelAIOS-GGUF" --include="*.md" --include="*.sh" . \
+  | grep -v '^./.git/' | grep -v '^./migration/CUTOVER.md:'
 
 # Licence is still byte-identical to the MLX edition's
 shasum -a 256 LICENSE
