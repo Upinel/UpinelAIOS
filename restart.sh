@@ -134,7 +134,10 @@ if [[ -n "$PROFILE_OVERRIDE" ]]; then
   case "$PROFILE_OVERRIDE" in
     speed|agent|writer|custom)
       EXPERT_PROFILE="$PROFILE_OVERRIDE"
-      set_config_value EXPERT_PROFILE "$EXPERT_PROFILE"
+      # Persisted like the interactive choice, but NOT under --print: a dry run
+      # that rewrites your config is a trap, and it is how a test that checks
+      # each profile in turn leaves the last one behind.
+      (( PRINT_ONLY )) || set_config_value EXPERT_PROFILE "$EXPERT_PROFILE"
       info "Profile: $(expert_profile_label "$EXPERT_PROFILE") - $(expert_profile_note "$EXPERT_PROFILE")"
       ;;
     *) die "--profile must be one of speed | agent | writer | custom" ;;

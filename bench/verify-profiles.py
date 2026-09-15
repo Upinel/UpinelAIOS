@@ -34,6 +34,7 @@ Run:  python3 bench/verify-profiles.py
 
 import os
 import re
+import shutil
 import subprocess
 import sys
 
@@ -89,11 +90,24 @@ def applied(profile):
 
 
 def print_args(profile):
-    """The command start.sh says it would run, with the profile applied."""
-    r = subprocess.run([f"{REPO}/start.sh", "--print", "--profile", profile],
-                       capture_output=True, text=True, timeout=180, cwd=REPO)
-    lines = [l.strip().rstrip("\\").strip() for l in r.stdout.splitlines()]
-    return [l for l in lines if l], r.returncode
+    """The command start.sh says it would run, with the profile applied.
+
+    Runs against a COPY of env.conf. Tests that write to the file you are
+    working in are a menace, and this one did: checking each profile in turn
+    left the last one persisted, so running the suite quietly changed which
+    profile the user was on.
+    """
+    env_file = os.path.join(REPO, "env.conf")
+    backup = env_file + ".profiletest"
+    shutil.copyfile(env_file, backup)
+    try:
+        r = subprocess.run([f"{REPO}/start.sh", "--print", "--profile", profile],
+                           capture_output=True, text=True, timeout=180, cwd=REPO)
+        lines = [l.strip().rstrip("\\").strip() for l in r.stdout.splitlines()]
+        return [l for l in lines if l], r.returncode
+    finally:
+        shutil.copyfile(backup, env_file)
+        os.unlink(backup)
 
 
 def main():
