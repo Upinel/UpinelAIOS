@@ -12,7 +12,7 @@
 -->
 # The GGUF runtime, and the FastMTP patch
 
-UpinelAIOS-GGUF runs everything through **llama.cpp**. That is a deliberate
+UpinelAIOS runs everything through **llama.cpp**. That is a deliberate
 constraint rather than a limitation we have not got around to: llama.cpp is the
 only runtime that can serve an uncensored Gemma 4 at all, and it serves every
 other GGUF equally well, which is why the Qwen family lives here too.
@@ -46,7 +46,7 @@ error loading model: check_tensor_dims: tensor 'output.weight' has wrong shape;
 exits. So attaching that head on a stock build does not cost you speed, it
 stops the server booting.
 
-### What UpinelAIOS-GGUF does about it
+### What UpinelAIOS does about it
 
 It detects the `d2t` tensor in the draft's GGUF and, unless you tell it
 otherwise, **skips the draft and runs autoregressive**, printing why:
@@ -168,7 +168,6 @@ they are:
 | `gguf-q-9b` | dense | 9B | 44.3 t/s | 65.1 t/s |
 | `gguf-q-27b` | dense | 27B | 13.5 t/s | 34.7 t/s |
 
-If you want Qwen 27B speed, the honest answer is the **MLX project**: MTPLX's
-MTP implementation works on Metal and llama.cpp's does not, which is the single
-clearest reason the two projects exist side by side. See
-[UpinelAIOS-MLX](https://github.com/Upinel/UpinelAIOS-MLX).
+If you want Qwen 27B speed, the honest answer is the **MLX engine**: MTPLX's MTP
+implementation works on Metal and llama.cpp's does not. Both engines ship in
+this one install, so switching is a model change rather than a switch of repo.

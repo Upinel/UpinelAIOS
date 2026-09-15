@@ -11,7 +11,7 @@
 #  "Make it work, make it right, make it fast - then measure it, because
 #   the third one is only a claim until the numbers agree."
 # ─────────────────────────────────────────────────────────────────────────────
-# Shared helpers for UpinelAIOS-GGUF.
+# Shared helpers for UpinelAIOS.
 # Sourced by install.sh / start.sh / stop.sh / restart.sh / status.sh / bench.
 #
 # Bash 3.2 compatible on purpose: that is what ships on macOS, and this bundle
@@ -308,7 +308,7 @@ load_config() {
   HOST="0.0.0.0"
   PORT=8000
   API_KEY_FILE="$REPO_DIR/run/api-key"
-  SERVED_MODEL_NAME="Upinel-AIOS-GGUF"
+  SERVED_MODEL_NAME="Upinel-AIOS"
   ENABLE_VISION=1
   PARALLEL_SLOTS=1
   FAN_MODE="default"

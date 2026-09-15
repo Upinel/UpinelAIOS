@@ -11,7 +11,7 @@
 #  "Make it work, make it right, make it fast - then measure it, because
 #   the third one is only a claim until the numbers agree."
 # ─────────────────────────────────────────────────────────────────────────────
-# Interactive chat against the running UpinelAIOS-GGUF endpoint.
+# Interactive chat against the running UpinelAIOS endpoint.
 #
 #   ./chat.sh                      start chatting
 #   ./chat.sh --system "..."       set the system prompt

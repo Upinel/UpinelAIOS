@@ -11,7 +11,7 @@
 #  "Make it work, make it right, make it fast - then measure it, because
 #   the third one is only a claim until the numbers agree."
 # ─────────────────────────────────────────────────────────────────────────────
-# Restart the UpinelAIOS-GGUF server, reloading env.conf.
+# Restart the UpinelAIOS server, reloading env.conf.
 #
 #   ./restart.sh              graceful stop, then start with the current env.conf
 #   ./restart.sh --force      SIGKILL on stop if the graceful path hangs

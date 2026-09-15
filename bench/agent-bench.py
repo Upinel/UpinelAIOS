@@ -11,7 +11,7 @@
 #  "Make it work, make it right, make it fast - then measure it, because
 #   the third one is only a claim until the numbers agree."
 # ─────────────────────────────────────────────────────────────────────────────
-"""Agent-realistic benchmark for UpinelAIOS-GGUF.
+"""Agent-realistic benchmark for UpinelAIOS.
 
 Why not bench/bench.sh
 ---------------------
@@ -34,7 +34,7 @@ single biggest lever on agent latency, so this measures it explicitly.
 
 Usage
 -----
-    python3 bench/agent-bench.py --model Upinel-AIOS-GGUF
+    python3 bench/agent-bench.py --model Upinel-AIOS
     python3 bench/agent-bench.py --depths 2048,8192,32768 --turns 3
     python3 bench/agent-bench.py --json out.json
 """
@@ -240,7 +240,7 @@ def main():
     ap.add_argument("--base", default=os.environ.get(
         "UPINEL_BASE", "http://127.0.0.1:8000/v1"))
     ap.add_argument("--key-file", default="run/api-key")
-    ap.add_argument("--model", default=os.environ.get("UPINEL_MODEL", "Upinel-AIOS-GGUF"))
+    ap.add_argument("--model", default=os.environ.get("UPINEL_MODEL", "Upinel-AIOS"))
     ap.add_argument("--depths", default="2048,8192,32768")
     ap.add_argument("--turns", type=int, default=2,
                     help="extra turns per depth, to measure KV reuse")

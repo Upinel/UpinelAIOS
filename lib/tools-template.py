@@ -11,7 +11,7 @@
 #  "Make it work, make it right, make it fast - then measure it, because
 #   the third one is only a claim until the numbers agree."
 # ─────────────────────────────────────────────────────────────────────────────
-"""Generate a tool-aware chat template for UpinelAIOS-GGUF.
+"""Generate a tool-aware chat template for UpinelAIOS.
 
 Why this exists
 ---------------

@@ -11,7 +11,7 @@
 #  "Make it work, make it right, make it fast - then measure it, because
 #   the third one is only a claim until the numbers agree."
 # ─────────────────────────────────────────────────────────────────────────────
-# One-time setup for UpinelAIOS-GGUF.
+# One-time setup for UpinelAIOS.
 #
 #   ./install.sh                 scan hardware, suggest settings, install
 #   ./install.sh --yes           accept the suggested settings without asking

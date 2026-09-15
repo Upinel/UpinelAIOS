@@ -35,7 +35,7 @@
 **Just want it running?** On an Apple Silicon Mac with 32 GB or more:
 
 ```bash
-git clone https://github.com/upinel/UpinelAIOS-GGUF && cd UpinelAIOS-GGUF
+git clone https://github.com/Upinel/UpinelAIOS && cd UpinelAIOS
 ./install.sh      # scans your Mac, suggests settings, installs everything
 ./start.sh        # serves http://<your-lan-ip>:8000/v1
 ./chat.sh         # talk to it, right here in the terminal
@@ -48,20 +48,22 @@ to pick a different model, [Benchmarks](#benchmarks) for the measured numbers.
 ---
 
 
-> **Sister project: [UpinelAIOS-MLX](https://github.com/Upinel/UpinelAIOS-MLX)** —
-> the same one-click agent server built on **MLX/MTPLX** rather than llama.cpp.
-> That one drives Qwen through MTPLX's MTP speculative decoding; this one serves
-> anything GGUF on llama.cpp, which is the only runtime that can run an
-> uncensored Gemma 4 at all. Choose by what you want to serve — both are tuned
-> as far as their runtime allows.
+> **One repo, both engines.** This was the GGUF edition; the MLX edition
+> ([UpinelAIOS-MLX](https://github.com/Upinel/UpinelAIOS-MLX)) has been folded
+> into it, and that repo now redirects here. You get llama.cpp and MLX/MTPLX in
+> the same install, and the engine follows the model you pick — a GGUF
+> checkpoint runs on llama.cpp, an MTPLX pack runs on MTPLX, and nothing asks
+> you to choose a runtime up front.
 
 A portable, one-command **uncensored agent endpoint** for Apple Silicon Macs,
-tuned for maximum tokens/sec. Two model families ship in the box:
+tuned for maximum tokens/sec. Two model families ship in the box, across two
+runtimes:
 
 | family | models | runtime |
 |---|---|---|
 | **Gemma 4** | `gguf-g-26ba4b` (default), `gguf-g-12b`, `gguf-g-31b`, `gguf-g-e2b`, `gguf-g-e4b` | llama.cpp |
 | **Qwen 3.8** | `gguf-q-27b`, `gguf-q-9b`, `gguf-q-35ba3b` | llama.cpp |
+| **Qwen 3.8 / 3.6** | `mlx-q-35ba3b`, `mlx-q-27b-4bit`, `mlx-q-27b-6bit`, `mlx-q-9b` | MLX / MTPLX |
 
 Built and measured on an **M5 Pro / 20-core GPU / 64 GB**, serving
 `OS-Software/gemma-4-26B-A4B-it-qat-q4_0-heretic-ja-GGUF` through llama.cpp with
@@ -93,7 +95,7 @@ Clone it, run `./install.sh`, run `./start.sh`. Nothing else.
   - [Thinking](#thinking)
   - [Vision costs 24%](#vision-costs-24)
 - [Going deeper](#going-deeper)
-  - [Why this is a separate project from UpinelAIOS-MLX](#why-this-is-a-separate-project-from-upinelaios-mlx)
+  - [Why Gemma runs on llama.cpp and Qwen can run on either](#why-gemma-runs-on-llamacpp-and-qwen-can-run-on-either)
   - [Speculative depth: the one speed knob that matters](#speculative-depth-the-one-speed-knob-that-matters)
   - [Thinking has a real token budget](#thinking-has-a-real-token-budget)
   - [Keep the prompt prefix stable](#keep-the-prompt-prefix-stable)
@@ -138,7 +140,7 @@ Disk: 4–20 GB per model, depending which you pick.
 ## Quick start
 
 ```bash
-git clone https://github.com/upinel/UpinelAIOS-GGUF && cd UpinelAIOS-GGUF
+git clone https://github.com/Upinel/UpinelAIOS && cd UpinelAIOS
 
 ./install.sh          # scans your Mac, suggests settings, installs everything
 ./start.sh            # serves http://<your-lan-ip>:8000/v1
@@ -296,7 +298,7 @@ a warning naming the replacement.
 
 ### Models: uncensored only
 
-**Every model UpinelAIOS-GGUF ships or suggests is an uncensored fine-tune.**
+**Every model UpinelAIOS ships or suggests is an uncensored fine-tune.**
 There is no point being fast at something that will not answer.
 
 You do not have to choose from these tables by hand. `install.sh` scans your Mac
@@ -388,16 +390,15 @@ bandwidth supports, not a bug — which is why `gguf-q-27b` sits at 13.5 t/s whi
 the 26B Gemma, a mixture of experts with only ~4B active per token, reaches
 106 t/s.
 
-So **if Qwen speed is what you want, use
-[UpinelAIOS-MLX](https://github.com/Upinel/UpinelAIOS-MLX)**: MTPLX's MTP
-implementation works on Metal and llama.cpp's does not, which is the clearest
-reason the two projects exist side by side.
+So **if Qwen speed is what you want, let the MLX engine serve it**: MTPLX's MTP
+implementation works on Metal and llama.cpp's does not. That is why both engines
+ship in this one install rather than in separate repos.
 
 **Only one quant is downloaded.** GGUF repos often publish every quant of the
 same model, and the `gguf-g-31b` repo carries ten of them — 232 GB in total,
 of which the 18.7 GB `Q4_K_M` is the one that fits a Mac. Fetching the repo
 wholesale would cost twelve times the disk and hours of download, so
-UpinelAIOS-GGUF picks a single quant (`MODEL_QUANT` in `env.conf`, default
+UpinelAIOS picks a single quant (`MODEL_QUANT` in `env.conf`, default
 `Q4_0`, matching the default model's QAT release) and skips the rest. If the
 model you switch to does not publish that quant, the closest one at the same bit
 width is used and `model_download.sh` says which. The sizes above are what
@@ -460,9 +461,9 @@ images; text quality is identical either way.
 
 ## Going deeper
 
-### Why this is a separate project from UpinelAIOS-MLX
+### Why Gemma runs on llama.cpp and Qwen can run on either
 
-The MLX edition runs on **MTPLX** (MLX). Gemma 4 cannot, and the reason is
+The MLX engine runs on **MTPLX** (MLX). Gemma 4 cannot, and the reason is
 structural rather than a preference.
 
 Gemma 4 has no MTP head. MTPLX drives it through a **target/assistant pair** —
@@ -583,7 +584,7 @@ Run `python3 bench/cache-reuse-test.py` to see which of these your harness does.
 > Measured on the same 8k prompts: an early edit costs 9.40 s by default,
 > **12.11 s at `--cache-reuse 64`** and **14.54 s at `--cache-reuse 256`** —
 > and `cache_n` stays at 343 either way, so it buys no reuse at all, only KV
-> shifting work. UpinelAIOS-GGUF deliberately does not set it.
+> shifting work. UpinelAIOS deliberately does not set it.
 
 ### Agents that write files
 
@@ -645,7 +646,7 @@ token. Every model below is uncensored.
 |---|---:|---:|---:|---|
 | **`gguf-g-26ba4b`** &nbsp;Gemma 4 26B-A4B Q4_0 QAT | **106.4 t/s** | 98 t/s | 1.1 s | **The default, and the fastest thing here.** MoE with ~4B active per token; this is the build the whole project is tuned around. |
 | `gguf-g-e2b` &nbsp;Gemma 4 E2B | 99.9 t/s | 294 t/s | 1.7 s | The snappy one: fastest prefill, smallest footprint, for a small Mac or quick replies. |
-| `gguf-q-35ba3b` &nbsp;Qwen 3.6 35B-A3B | 70.5 t/s | 180 t/s | 2.7 s | Works, but the [MLX project](https://github.com/Upinel/UpinelAIOS-MLX) runs this same model faster. |
+| `gguf-q-35ba3b` &nbsp;Qwen 3.6 35B-A3B | 70.5 t/s | 180 t/s | 2.7 s | Works, but the **MLX engine** runs this same model faster. |
 | `gguf-g-e4b` &nbsp;Gemma 4 E4B | 63.9 t/s | 84 t/s | 0.4 s | Only when the Mac genuinely cannot fit `gguf-g-26ba4b`. |
 | `gguf-g-12b` &nbsp;Gemma 4 12B | 54.5 t/s | 81 t/s | 2.6 s | The largest model that still fits a **16 GB** Mac. `gguf-g-e2b` is nearly twice as fast, so pick it for capability, not speed. |
 | `gguf-q-9b` &nbsp;Qwen 3.8 9B | 44.3 t/s | 130 t/s | 4.1 s | Use the **MLX** build instead — ~47% faster there. |
@@ -861,7 +862,7 @@ one you just passed. `Enter` applies now, `Esc` cancels.
 
 ### This project
 
-**UpinelAIOS-GGUF is © 2026 Nova Upinel Chow, released under the
+**UpinelAIOS is © 2026 Nova Upinel Chow, released under the
 [Upinel Personal Free License](LICENSE).** In short:
 
 | | |
@@ -877,10 +878,10 @@ So: making a video about it, reviewing it, or using it on stream to generate
 content is free, forever, no permission needed — tell us and carry on. Selling
 it, or selling something that runs on it, is the thing to ask about.
 
-> **One licence file, both projects.** `LICENSE` is byte-identical in
-> UpinelAIOS-GGUF and UpinelAIOS-MLX, and its scope clause covers both editions,
-> so you never have to work out which terms apply to which repo. To confirm the
-> two have not drifted:
+> **One licence file, both engines.** `LICENSE` is byte-identical to the one
+> the MLX edition carried before it was folded in, and its scope clause covers
+> both engines, so you never have to work out which terms apply to which part
+> of the install. To confirm it has not drifted:
 >
 > ```bash
 > shasum -a 256 LICENSE

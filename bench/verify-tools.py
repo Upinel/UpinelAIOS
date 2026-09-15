@@ -28,7 +28,7 @@ This script measures how many tokens a realistic file-write actually needs, so
 the number stops being a guess.
 
 Usage:
-  bench/verify-tools.py --url http://127.0.0.1:8000 --model Upinel-AIOS-GGUF
+  bench/verify-tools.py --url http://127.0.0.1:8000 --model Upinel-AIOS
 """
 
 import argparse
@@ -140,7 +140,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--url", default="http://127.0.0.1:8000")
-    ap.add_argument("--model", default="Upinel-AIOS-GGUF")
+    ap.add_argument("--model", default="Upinel-AIOS")
     ap.add_argument("--api-key")
     ap.add_argument("--api-key-file")
     ap.add_argument("--timeout", type=int, default=900)
