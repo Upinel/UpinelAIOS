@@ -47,7 +47,7 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 
-step "UpinelAIOS-GGUF - One-Click AI Agent Server OS for Mac, Gemma 4 edition"
+step "UpinelAIOS - One-Click AI Agent Server OS for Mac"
 
 is_apple_silicon || die "This bundle targets Apple Silicon Macs. Detected: $(uname -s)/$(uname -m)."
 require_macos
@@ -66,29 +66,72 @@ fi
 # it is a one-off choice for this run.
 if [[ -n "$MODEL_OVERRIDE" ]]; then
   MODEL_REPO="$(model_repo_for "$MODEL_OVERRIDE")"
+  MODEL_ALIAS="$MODEL_OVERRIDE"
   MODEL_DIR="$MODELS_DIR/${MODEL_REPO//\//--}"
-  info "Overriding the model for this run: $MODEL_REPO"
-  info "To make it permanent, set MODEL in env.conf."
+  info "Model for this install: $MODEL_REPO"
+  # Persist it. --model means "install this one", and the hardware scan above
+  # has just written its own suggestion into env.conf - so without this the
+  # installer would download one model and ./start.sh would serve another.
+  # (./start.sh --model stays a one-off; this is the install path, where the
+  # choice is the point.)
+  set_config_value MODEL "$MODEL_REPO"
+  ok "MODEL set in env.conf"
+else
+  MODEL_ALIAS="$(alias_for_repo "$MODEL_REPO")"
 fi
+
+# ── which engine serves the chosen model ─────────────────────────────────────
+# The engine follows the model, and everything below - which runtime to
+# install, how to verify the download, whether a depth sweep applies - depends
+# on it.
+ENGINE="$(model_engine_for "${MODEL_ALIAS:-$MODEL_REPO}")"
+if [[ -z "$ENGINE" ]]; then
+  ENGINE="$(engine_for_dir "$MODEL_DIR")"
+fi
+if [[ -z "$ENGINE" ]]; then
+  die "Cannot tell which engine serves '$MODEL_REPO'.
+    Known aliases: $MODEL_ALIASES"
+fi
+load_engine "$ENGINE"
+export MODEL_REPO MODEL_DIR
 
 if (( DO_MODEL || DO_TUNE )); then
   log ""
   log "  Serving:  $MODEL_REPO"
-  log "  Context:  $CONTEXT_WINDOW tokens   KV: $KV_QUANT   MTP depth: $MTP_DEPTH"
+  log "  Engine:   $(engine_name)"
+  log "  Context:  $CONTEXT_WINDOW tokens   KV: $(kv_quant_for "$ENGINE")   MTP depth: $MTP_DEPTH"
 fi
 
 # ── 2. dependencies ──────────────────────────────────────────────────────────
 if (( DO_DEPS )); then
-  step "Installing the llama.cpp runtime"
+  # The engine follows the model, so install the one this model needs - and
+  # only then offer the other. Installing both up front would mean a Homebrew
+  # formula plus, for MTPLX, a Python runtime most people never use.
+  step "Installing the $(engine_name) runtime"
+  engine_install
 
-  if command -v llama-server >/dev/null 2>&1; then
-    ok "llama.cpp already installed: $(llama_version)"
-  else
-    require_bin brew "Install Homebrew from https://brew.sh, then re-run ./install.sh"
-    info "brew install llama.cpp"
-    brew install llama.cpp
+  OTHER="$(other_engine "$ENGINE")"
+  if [[ -n "$OTHER" ]]; then
+    load_engine "$OTHER"
+    if engine_present; then
+      ok "$(engine_name) is also installed - you can run both engines."
+    else
+      log ""
+      log "  ${C_DIM}$(engine_name) is not installed. It would add roughly 1-2 GB and"
+      log "  lets you run the other half of the model list:${C_RESET}"
+      log "  ${C_DIM}  gguf: Gemma 4 at peak speed, vision${C_RESET}"
+      log "  ${C_DIM}  mlx:  anything Qwen, up to 2.6x faster than llama.cpp${C_RESET}"
+      log ""
+      if ask_yes_no "Install $(engine_name) as well?" n; then
+        engine_install
+      else
+        info "Skipping $(engine_name). Run ./install.sh again any time, or"
+        info "./model_download.sh will offer it if you pick one of its models."
+      fi
+    fi
+    # Restore the engine this install is actually about.
+    load_engine "$ENGINE"
   fi
-  ok "llama.cpp ready: $(llama_version)"
 
   command -v python3 >/dev/null 2>&1 || warn "python3 not found - ./bench/bench.sh needs it."
 
@@ -136,19 +179,34 @@ if (( DO_MODEL )); then
   "$REPO_DIR/lib/fetch-model.sh" "$MODEL_REPO" "$MODEL_DIR"
 
   info "Checking the model files..."
-  MAIN="$(model_main_gguf "$MODEL_DIR" || true)"
-  [[ -n "$MAIN" ]] && ok "Weights: $(basename "$MAIN")" || warn "No main .gguf found."
-  [[ -n "$(model_mmproj_gguf "$MODEL_DIR" || true)" ]] && ok "Vision projector present."
-  if [[ -n "$(model_draft_gguf "$MODEL_DIR" || true)" ]]; then
-    ok "Speculative draft present - expect a real speedup."
+  # Each engine knows what a complete model looks like: one weight file for
+  # GGUF, an index-complete shard set for MLX.
+  if engine_model_ok "$MODEL_DIR"; then
+    ok "Model ready: $(engine_model_summary "$MODEL_DIR")"
   else
-    warn "No draft file: this model runs autoregressive only."
+    warn "The download looks incomplete for $(engine_name)."
+    warn "Re-run ./model_download.sh ${MODEL_ALIAS:-$MODEL_REPO} to finish it."
+  fi
+  # GGUF extras: a projector, and a draft head that turns MTP on.
+  if [[ "$ENGINE" == "gguf" ]]; then
+    [[ -n "$(model_mmproj_gguf "$MODEL_DIR" || true)" ]] && ok "Vision projector present."
+    if [[ -n "$(model_draft_gguf "$MODEL_DIR" || true)" ]]; then
+      ok "Speculative draft present - expect a real speedup."
+    else
+      warn "No draft file: this model runs autoregressive only."
+    fi
   fi
 else
   step "Skipping model download"
 fi
 
 # ── 4. speculative depth ─────────────────────────────────────────────────────
+if (( DO_TUNE )) && ! engine_tunable; then
+  step "Skipping the depth sweep"
+  log "    The $(engine_name) engine records depth per model rather than sweeping it."
+  DO_TUNE=0
+fi
+
 if (( DO_TUNE )); then
   step "Measuring the fastest speculative depth on THIS machine"
   log "     Loads the model several times; 10-20 minutes."

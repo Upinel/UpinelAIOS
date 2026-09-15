@@ -33,6 +33,25 @@ engine_install_hint() {
   echo "Run ./install.sh first, or: brew install youssofal/mtplx/mtplx"
 }
 
+# Install the runtime. Idempotent, and it bootstraps MTPLX's own Python
+# runtime on first use, which takes a few minutes.
+engine_install() {
+  if command -v mtplx >/dev/null 2>&1; then
+    ok "mtplx already installed: $(engine_version)"
+    return 0
+  fi
+  require_bin brew "Install Homebrew from https://brew.sh, then re-run ./install.sh"
+  info "brew install youssofal/mtplx/mtplx"
+  brew install youssofal/mtplx/mtplx || die "brew install mtplx failed."
+  info "Bootstrapping the MTPLX Python runtime (first run only, a few minutes)..."
+  mtplx --version >/dev/null 2>&1 || true
+  ok "MTPLX ready: $(engine_version)"
+}
+
+# Depth is recorded per model rather than swept, so the GGUF depth sweep does
+# not apply here.
+engine_tunable() { return 1; }
+
 # MTPLX bootstraps a Python runtime on first use.
 engine_setup() { :; }
 

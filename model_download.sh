@@ -35,27 +35,50 @@ esac
 # projector and the MTP draft head. Not the whole repo - several of these
 # publish every quant, and the others are skipped. See MODEL_QUANT in env.conf.
 size_hint() {
+  # MLX packs are checked first, because the two engines' repo names overlap -
+  # both publish a "Qwen3.8-9B", at 5 GB and 6 GB respectively - and matching on
+  # the family alone would report the wrong one.
+  case "$1" in
+    *MTPLX*|*mtplx*)
+      case "$1" in
+        *6bit*|*6-bit*)          echo "23 GB" ;;
+        *3bit*|*3-bit*)          echo "13 GB" ;;
+        *35B-A3B*)               echo "22 GB" ;;
+        *9B*)                    echo "5 GB"  ;;
+        *)                       echo "15 GB" ;;
+      esac
+      return 0 ;;
+  esac
+
   case "$1" in
     *q4_0-heretic*) echo "15 GB" ;;
     *Qwen3.8-27B*)  echo "19 GB" ;;
     *Qwen3.8-9B*)   echo "6 GB"  ;;
     *Qwen3.6-35B*)  echo "22 GB" ;;
-    *26B-A4B*) echo "18 GB" ;;
-    *12B*)     echo "8 GB"  ;;
-    *31B*)     echo "20 GB" ;;
-    *E4B*)     echo "6 GB"  ;;
-    *E2B*)     echo "4 GB"  ;;
-    *)         echo "?"     ;;
+    *26B-A4B*)      echo "18 GB" ;;
+    *12B*)          echo "8 GB"  ;;
+    *31B*)          echo "20 GB" ;;
+    *E4B*)          echo "6 GB"  ;;
+    *E2B*)          echo "4 GB"  ;;
+    *)              echo "?"     ;;
   esac
 }
 
-model_on_disk() { model_present "$MODELS_DIR/${1//\//--}"; }
+# Engine-aware: a GGUF model is one weight file, an MLX pack is an
+# index-complete shard tree, so "downloaded?" means different things.
+model_on_disk() {
+  local dir="$MODELS_DIR/${1//\//--}"
+  case "$(model_engine_for "$1")" in
+    mlx) model_dir_ok "$dir" ;;
+    *)   model_present "$dir" ;;
+  esac
+}
 disk_usage()    { du -shL "$MODELS_DIR/${1//\//--}" 2>/dev/null | awk '{print $1}'; }
 
 list_models() {
   step "Known uncensored models"
-  printf '  %-12s %-8s %-10s %s\n' "ALIAS" "SIZE" "ON DISK" "REPO"
-  printf '  %-12s %-8s %-10s %s\n' "------------" "--------" "----------" "------------------------------------------"
+  printf '  %-5s %-12s %-8s %-12s %s\n' "ENG" "ALIAS" "SIZE" "ON DISK" "REPO"
+  printf '  %-5s %-12s %-8s %-12s %s\n' "-----" "------------" "--------" "------------" "------------------------------------------"
   for alias in $MODEL_ALIASES; do
     repo="$(model_repo_for "$alias")"
     if model_on_disk "$repo"; then
@@ -65,19 +88,28 @@ list_models() {
     fi
     marker=""
     [[ "$repo" == "$MODEL_REPO" ]] && marker="  ${C_CYAN}<- current${C_RESET}"
-    printf "  %-12s %-8s %-10b %s%b\n" "$alias" "$(size_hint "$repo")" "$state" "$repo" "$marker"
+    eng="$(model_engine_for "$repo")"
+    case "$eng" in
+      gguf) engc="$C_YELLOW" ;;
+      mlx)  engc="$C_BLUE"   ;;
+      *)    engc="$C_DIM"    ;;
+    esac
+    engup="$(printf '%s' "$eng" | tr '[:lower:]' '[:upper:]')"
+    printf "  %b%-5s%b %-12s %-8s %-12b %s%b\n" \
+      "$engc" "$engup" "$C_RESET" "$alias" "$(size_hint "$repo")" "$state" "$repo" "$marker"
   done
   log ""
   log "  ${C_DIM}current selection: $MODEL_REPO${C_RESET}"
   log "  ${C_DIM}quant:             ${MODEL_QUANT:-Q4_K_M} (set MODEL_QUANT in env.conf)${C_RESET}"
   log "  ${C_DIM}models live in:    $MODELS_DIR${C_RESET}"
   log ""
-  log "  ${C_DIM}Size is what will actually be fetched: the selected quant plus the${C_RESET}"
-  log "  ${C_DIM}vision projector and MTP draft head. Other quants are skipped.${C_RESET}"
+  log "  ${C_DIM}ENG is the engine that will serve the model - GGUF for llama.cpp,${C_RESET}"
+  log "  ${C_DIM}MLX for MTPLX. The engine follows the model; there is nothing to set.${C_RESET}"
+  log "  ${C_DIM}Downloading from an engine you do not have yet offers to install it.${C_RESET}"
   log ""
   log "  Download one:   ./model_download.sh 12b"
   log "  Switch to one:  ./model_download.sh --switch 12b"
-  log "  ${C_DIM}Any owner/name Hugging Face repo also works if it is a GGUF Gemma 4.${C_RESET}"
+  log "  ${C_DIM}Any owner/name Hugging Face repo also works: GGUF or MTPLX.${C_RESET}"
 }
 
 download_one() {
@@ -90,18 +122,37 @@ download_one() {
     return 0
   fi
 
-  step "Downloading $want"
+  # The engine follows the model. If this is the first model from the other
+  # engine, install that engine now rather than failing later at ./start.sh.
+  local eng; eng="$(model_engine_for "$want")"
+  [[ -n "$eng" ]] || eng="$(model_engine_for "$repo")"
+  [[ -n "$eng" ]] || eng="gguf"
+  load_engine "$eng"
+
+  step "Downloading $want  ($(engine_name))"
   log "  repo:  $repo"
-  log "  quant: ${MODEL_QUANT:-Q4_K_M}  (other quants in the repo are skipped)"
   log "  size:  about $(size_hint "$repo")"
+  if [[ "$eng" == "gguf" ]]; then
+    log "  quant: ${MODEL_QUANT:-Q4_K_M}  (other quants in the repo are skipped)"
+  fi
   log ""
+
+  if ! engine_present; then
+    log "  ${C_DIM}$(engine_name) is not installed, and this model needs it.${C_RESET}"
+    if ask_yes_no "Install $(engine_name) now?" y; then
+      engine_install || return 1
+    else
+      warn "Cannot download $want without $(engine_name)."
+      return 1
+    fi
+  fi
+
   "$REPO_DIR/lib/fetch-model.sh" "$repo" "$dir" || return 1
 
-  local main; main="$(model_main_gguf "$dir" || true)"
-  if [[ -n "$main" ]]; then
-    ok "Weights: $(basename "$main")  ($(( $(stat -f%z "$main") / 1000000000 )) GB)"
+  if engine_model_ok "$dir"; then
+    ok "Model ready: $(engine_model_summary "$dir")"
   else
-    warn "Downloaded, but no main .gguf was found in $dir"
+    warn "Downloaded, but the model looks incomplete for $(engine_name) in $dir"
   fi
   if [[ -n "$(model_mmproj_gguf "$dir" || true)" ]]; then
     ok "Vision projector present."

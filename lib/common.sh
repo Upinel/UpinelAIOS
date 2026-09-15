@@ -196,6 +196,33 @@ model_family_for() {
 }
 
 # ── config ───────────────────────────────────────────────────────────────────
+# set_config_value <KEY> <value>
+#
+# Rewrites one key in env.conf, preserving every comment and every other line.
+# Used by install.sh to persist a model choice that the hardware scan would
+# otherwise overwrite.
+set_config_value() {
+  local key="$1" value="$2"
+  python3 - "$ENV_FILE" "$key" "$value" <<'PYSET'
+import re, sys
+path, key, value = sys.argv[1], sys.argv[2], sys.argv[3]
+# Keys that env.conf quotes; keep the file's own convention.
+QUOTED = {"MODEL", "KV_QUANT", "PROFILE", "THINKING", "MODEL_QUANT",
+          "FAN_MODE", "BATCHING_PRESET", "PRESERVE_THINKING",
+          "SSD_SESSION_CACHE", "METAL_TENSOR_API", "SERVED_MODEL_NAME",
+          "HOST", "API_KEY_FILE", "LLAMA_SERVER", "TOOL_TEMPLATE",
+          "MODELS_DIR", "LOG_FILE", "DRAFT_PATCHED_RUNTIME",
+          "MTP_DEPTH", "PREFILL_CHUNK_TOKENS"}
+src = open(path, encoding="utf-8").read()
+val = f'"{value}"' if key in QUOTED and not value.startswith('"') else value
+new, n = re.subn(rf'^{re.escape(key)}=.*$', f'{key}={val}', src, count=1, flags=re.M)
+if n == 1:
+    open(path, "w", encoding="utf-8").write(new)
+    sys.exit(0)
+sys.exit(1)
+PYSET
+}
+
 load_config() {
   [[ -f "$ENV_FILE" ]] || die "env.conf not found at $ENV_FILE"
 
@@ -665,6 +692,52 @@ prefill_chunk_for() {
     auto|"") case "$1" in gguf) echo 512 ;; mlx) echo 2048 ;; *) echo 512 ;; esac ;;
     *)       echo "$PREFILL_CHUNK_TOKENS" ;;
   esac
+}
+
+# ── interactive prompts ──────────────────────────────────────────────────────
+# ask_yes_no <question> <default: y|n>
+#
+# Reads from /dev/tty when stdin is not a terminal, so a scripted install
+# (curl | bash) can still ask. Returns 1 without asking when there is no
+# terminal at all, which is what makes an unattended install work.
+ask_yes_no() {
+  local q="$1" default="${2:-n}" reply="" hint="[y/N]"
+  [[ "$default" == "y" ]] && hint="[Y/n]"
+
+  if [[ ! -c /dev/tty ]]; then
+    [[ "$default" == "y" ]] && return 0 || return 1
+  fi
+
+  printf '  %s %s ' "$q" "$hint"
+  if [[ -t 0 ]]; then
+    read -r reply || reply=""
+  else
+    read -r reply < /dev/tty || reply=""
+  fi
+
+  case "$reply" in
+    "") [[ "$default" == "y" ]] && return 0 || return 1 ;;
+    [Yy]*) return 0 ;;
+    [Nn]*) return 1 ;;
+    *) [[ "$default" == "y" ]] && return 0 || return 1 ;;
+  esac
+}
+
+# The engine the user did NOT pick, for the "install both?" offer.
+other_engine() {
+  case "$1" in
+    gguf) echo mlx  ;;
+    mlx)  echo gguf ;;
+    *)    echo ""   ;;
+  esac
+}
+
+# Load an engine module by name.
+load_engine() {
+  local mod="$REPO_DIR/lib/engines/$1.sh"
+  [[ -f "$mod" ]] || die "No engine module at $mod"
+  # shellcheck source=/dev/null
+  source "$mod"
 }
 
 model_dir_gb() {

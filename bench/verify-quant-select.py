@@ -40,7 +40,10 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
-FETCH = os.path.join(REPO, "lib", "fetch-model.sh")
+# The GGUF fetcher specifically. lib/fetch-model.sh is now a dispatcher that
+# picks a fetcher by engine, so the quant-selection logic this suite tests
+# lives in the GGUF implementation beside it.
+FETCH = os.path.join(REPO, "lib", "fetch-model-gguf.sh")
 
 
 def gb(x):
@@ -126,6 +129,9 @@ def select_note(listing, pref):
     when the substitution kept the bit width and "warn" when it did not.
     """
     src = open(FETCH).read()
+    if "<<'PY'" not in src:
+        raise SystemExit(f"{FETCH} no longer contains the selector block this "
+                         f"suite tests - update FETCH in {os.path.abspath(__file__)}")
     block = src.split("<<'PY'")[1].split("\nPY\n")[0]
     with tempfile.TemporaryDirectory() as td:
         mpath = os.path.join(td, "m.json")

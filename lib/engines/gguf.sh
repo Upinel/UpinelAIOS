@@ -36,6 +36,22 @@ engine_install_hint() {
   echo "Run ./install.sh first, or: brew install llama.cpp"
 }
 
+# Install the runtime. Idempotent: skips when it is already there.
+engine_install() {
+  if command -v llama-server >/dev/null 2>&1; then
+    ok "llama.cpp already installed: $(llama_version)"
+    return 0
+  fi
+  require_bin brew "Install Homebrew from https://brew.sh, then re-run ./install.sh"
+  info "brew install llama.cpp"
+  brew install llama.cpp || die "brew install llama.cpp failed."
+  ok "llama.cpp ready: $(llama_version)"
+}
+
+# Does this engine have a speculative-depth sweep worth running? GGUF ships an
+# MTP draft head, so depth is a real knob. MLX does not sweep the same way.
+engine_tunable() { return 0; }
+
 # Nothing to install beyond the binary itself. LLAMA_SERVER in env.conf may
 # point at a patched build for models whose draft head needs it.
 engine_setup() { :; }
