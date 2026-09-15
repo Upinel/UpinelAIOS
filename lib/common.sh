@@ -680,24 +680,21 @@ model_draft_gguf() {
 # means the download did not finish.
 # KV cost per token in KB at f16, for the MLX engine's packs.
 #
-# NOTE: for Qwen this disagrees with the GGUF table above by about 4x, and the
-# disagreement is unresolved. The two projects modelled the same base models
-# differently - the GGUF table assumes full attention on every layer
-# (Qwen3.8-27B: 260 KB/token), the MLX table assumes a hybrid that caches KV on
-# a subset (64 KB/token). At least one of them is wrong, and a 4x error in this
-# number either wastes memory or invites an OOM.
+# These must agree with the GGUF table for any base model both engines can
+# serve, because KV per token is a property of the architecture rather than of
+# the runtime reading it: the same model stores the same K and V either way.
+# They did not - the two tables disagreed by 4x on Qwen, one of them assuming
+# full attention and the other a hybrid, and both were partly wrong.
 #
-# Both are kept verbatim so that neither engine's memory arithmetic changes
-# under the merge. Resolving it needs a measurement, not a guess: run a long
-# prompt on each engine and read the KV allocation out of the server log.
+# The 27B entry happened to be right and the other two were not, which is the
+# kind of thing that survives a merge unnoticed. bench/verify-kv-table.py now
+# fails if these ever disagree with the GGUF table again.
 kv_kb_per_token_f16_mlx() {
   case "$1" in
-    # ~12 of 48 attention layers.
-    *Qwen3.6-35B*) echo 48  ;;
-    # 32 of 32 layers - dense, full attention on every layer.
-    *Qwen3.8-9B*)  echo 128 ;;
-    # 16 of 64 layers - every 27B build here (4bit/6bit/3bit, both owners).
-    *)             echo 64  ;;
+    *Qwen3.6-35B*) echo 20 ;;   # 40 blocks, 10 full layers, 4 x 10 x 2 x 256
+    *Qwen3.8-9B*)  echo 32 ;;   # 32 blocks,  8 full layers, 4 x  8 x 4 x 256
+    *Qwen3.8-27B*) echo 64 ;;   # 65 blocks, 16 full layers, 4 x 16 x 4 x 256
+    *)             echo 64 ;;
   esac
 }
 
@@ -1256,26 +1253,36 @@ kv_gb_for_context() {
 #   * Gemma 4 interleaves sliding-window attention (a 1024-token window on 25
 #     of 30 layers) with a few full-attention layers, so only those few grow
 #     with context. 26B-A4B costs ~20 KB/token, i.e. 1.3 GB at q8 over 131k.
-#   * Qwen 3.x is full attention on every layer. The 27B has 65 layers of
-#     4 KV heads at 256 wide, so ~260 KB/token - 17 GB at q8 over 131k, which
-#     is most of a 32 GB Mac before any weights are loaded.
+#   * Qwen 3.x is NOT full attention - it is hybrid, and assuming otherwise
+#     overstated it by up to 10x. Only every 4th layer keeps a per-token KV
+#     cache; the rest are SSM/linear layers holding a fixed-size state that
+#     does not grow with context at all. The GGUF metadata says so plainly
+#     (full_attention_interval = 4, plus a whole ssm.* block), and llama.cpp
+#     acts on it.
 #
-# Getting this wrong in the low direction is what matters: an earlier version
-# of this table had no Qwen entries at all and fell through to a 64 KB default,
-# under-reporting the 27B by 4x and making a model that will not fit look
-# comfortable.
+# Getting this wrong in either direction costs something. Too low and a model
+# that will not fit looks comfortable; too high and the installer refuses a
+# model that would have run, which is what the old Qwen numbers did.
+#
+# The Qwen figures below are the architecture arithmetic, and the 9B was then
+# confirmed against the running engine - RSS across three context sizes on
+# Qwen3.8-9B at q8:  8k -> 32k gave 17.07 KB/token, 32k -> 64k gave 17.12.
+# That is 34 KB/token at f16 against the 32 predicted here, and the tables
+# previously claimed 128.
 kv_kb_per_token_f16_gguf() {
   case "$1" in
     # Gemma 4 - sliding-window attention, so growth is only the full layers.
-    *q4_0-heretic*|*26B-A4B*) echo 20 ;;   # 5 of 30 layers full, 2 KV heads x 512
+    # Confirmed from the metadata: 30 blocks, 5 with sliding_window_pattern
+    # false, and those 5 are the ones carrying head_count_kv=2 / key_length=512.
+    *q4_0-heretic*|*26B-A4B*) echo 20 ;;   # 5 of 30 full, 4 x 5 x 2 x 512
     *Gemma4-12B*)             echo 32 ;;   # 48 layers; estimate, not measured
     *gemma-4-31B*)            echo 40 ;;   # 60 layers; estimate, not measured
     *Gemma-4-E4B*)            echo 16 ;;
     *Gemma-4-E2B*)            echo 16 ;;
-    # Qwen 3.x - full attention everywhere.
-    *Qwen3.8-27B*)            echo 260 ;;  # 65 layers, 4 KV x 256
-    *Qwen3.8-9B*)             echo 128 ;;  # 32 layers, 4 KV x 256
-    *Qwen3.6-35B*)            echo 192 ;;  # MoE, 48 layers; estimate, not measured
+    # Qwen 3.x - hybrid. 4 (K and V, 2 bytes each) x full layers x kv heads x 256.
+    *Qwen3.8-27B*)            echo 64 ;;   # 65 blocks, 16 full, 4 x 16 x 4 x 256
+    *Qwen3.8-9B*)             echo 32 ;;   # 32 blocks,  8 full, 4 x  8 x 4 x 256
+    *Qwen3.6-35B*)            echo 20 ;;   # 40 blocks, 10 full, 4 x 10 x 2 x 256
     *)                        echo 64 ;;
   esac
 }

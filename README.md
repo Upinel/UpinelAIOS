@@ -320,21 +320,30 @@ answer `n` at the prompt and it prints a numbered list of everything below, each
 row marked with a verdict for *your* memory:
 
 ```
-    #  ALIAS        SIZE   VERDICT              NOTE
-    1  26b-q4       15 GB  RECOMMENDED          uncensored MoE, 3B active - the fastest 26B here
-    2  26b-a4b      18 GB  fits comfortably     same MoE in Q4_K_M: about 20% slower, 3 GB bigger
+  Pick a model   this Mac has 64 GB of unified memory
+
+    #  ALIAS           SIZE   VERDICT              NOTE
+  ---  -------------- ------ -------------------- ------------------------------------
+    1  gguf-g-26ba4b   15 GB  RECOMMENDED          uncensored MoE, 3B active - the fastest 26B here
+    2  gguf-g-12b       8 GB  fits comfortably     dense 12B - smaller and less capable, still quick
     ...
-    7  qwen-27b     19 GB  will not fit         dense 27B, ~14 t/s; its MTP head needs a build step
+    6  gguf-q-27b      19 GB  fits comfortably     dense 27B, ~13.5 t/s; its MTP head needs a build step
+    ...
+    9  mlx-q-35ba3b    22 GB  fits comfortably     35B MoE, ~3B active - fastest Qwen here (~98 t/s)
+   10  mlx-q-27b-4bit  19 GB  fits comfortably     dense 27B 4-bit - the quality pick (~35 t/s)
+    ...
+   14  mlx-q-9b         6 GB  fits comfortably     dense 9B (~65 t/s) - only when memory is tight
   Model number:
 ```
 
 `RECOMMENDED` / `fits comfortably` / `tight - expect paging` / `will not fit` are
 computed from your unified memory, the model's published size, and that model's
-own KV cost per token — a full-attention Qwen costs several times more per token
-than the sliding-window Gemma MoE, so the verdicts are per-model, not per-size.
-Enter a number to use it, or press Enter to keep the config you already have.
-Choosing something that will not fit is allowed; it warns, then does what you
-asked.
+own KV cost per token. That last number is per-model and worth knowing: the
+Gemma MoE grows at ~20 KB/token because only 5 of its 30 layers keep a
+per-token cache, the Qwen models are hybrid too (~20-64 KB/token, since only
+every 4th layer caches), so a verdict is never just a function of size. Enter a
+number to use it, or press Enter to keep the config you already have. Choosing
+something that will not fit is allowed; it warns, then does what you asked.
 
 #### Gemma 4
 
