@@ -24,7 +24,7 @@ git status --short          # must be empty
 Everything below assumes a clean tree. The full sweep must be green:
 
 ```bash
-./bench/verify-all.sh       # 258 assertions, offline, no server needed
+./bench/verify-all.sh       # 277 assertions, offline, no server needed
 ./install.sh --scan-only    # must not error
 ```
 

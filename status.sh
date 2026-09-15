@@ -138,64 +138,14 @@ esac
 
 require_bin python3 "python3 is required for the dashboard."
 
-# Hand the configuration to the dashboard as JSON so we keep one source of
-# truth (env.conf) instead of duplicating parsing in Python.
-# Facts about the model on disk, for the dashboard. The engine fills the parts
-# that apply to it - a GGUF model has one weight file and maybe a projector, an
-# MLX pack has neither - so this script does not branch on the engine and
-# cannot fall out of step with it.
-STATUS_MAIN=""; STATUS_WEIGHTS_GB=0; STATUS_KV_GB=0; STATUS_VISION_GB=0
-STATUS_DIR="$MODELS_DIR/${STATUS_REPO//\//--}"
-if load_engine "$STATUS_ENGINE" >/dev/null 2>&1; then
-  engine_status_extras "$STATUS_DIR"
-fi
-# KV is derived from the model's own cost per token, which is engine-aware even
-# when the model files are not present yet.
-STATUS_KV_GB=$(( CONTEXT_WINDOW * $(kv_kb_for_engine "$STATUS_ENGINE") / 1024 / 1024 ))
+# Hand the configuration to the dashboard as JSON - one source of truth
+# (env.conf and the launch snapshot) instead of duplicated parsing in Python.
+# It goes to a file, and the dashboard re-reads it when it changes -
+# so a dashboard left running across a ./restart.sh that switches model or
+# engine follows the switch instead of showing what was serving at startup.
+DASH_CFG_FILE="$RUN_DIR/dashboard-cfg.json"
+export DASH_CFG_FILE
+write_dashboard_payload "$STATUS_REPO" >/dev/null
 
-CONFIG_JSON="$(python3 - <<PY
-import json, os
-print(json.dumps({
-    "base": "http://127.0.0.1:${PORT}/v1",
-    "lan_url": "http://$(lan_ip):${PORT}/v1",
-    "api_key": open("${API_KEY_FILE}").read().strip() if os.path.exists("${API_KEY_FILE}") else "",
-    "api_key_file": "${API_KEY_FILE}",
-    "pid_file": "${PID_FILE}",
-    "log_file": "${LOG_FILE}",
-    "error_log": "$RUN_DIR/dashboard.err",
-    "models_dir": "${MODELS_DIR}",
-    "repo_dir": "${REPO_DIR}",
-    "env_file": "${ENV_FILE}",
-    "model_dir": "${MODEL_DIR}",
-    "model": "${MODEL}",
-    "served_name": "${SERVED_MODEL_NAME}",
-    "model_repo": "${MODEL_REPO}",
-    # Which engine is serving. The dashboard shows it, and uses it to decide
-    # which panels make sense - a GGUF draft head means nothing on MLX.
-    "engine": "${STATUS_ENGINE}",
-    # GGUF-only facts, computed from what is actually on disk. Empty on MLX,
-    # where a pack is a shard tree rather than one file plus extras.
-    "main_gguf": "${STATUS_MAIN:-}",
-    "weights_gb": "${STATUS_WEIGHTS_GB:-0}",
-    "kv_gb": "${STATUS_KV_GB:-0}",
-    "vision_gb": "${STATUS_VISION_GB:-0}",
-    "slots": "${PARALLEL_SLOTS:-1}",
-    "context": "${CONTEXT_WINDOW}",
-    "ctx": "${CONTEXT_WINDOW}",
-    "kv": "$(kv_quant_for "$STATUS_ENGINE")",
-    "profile": "${PROFILE}",
-    "thinking": "${THINKING}",
-    "preserve_thinking": "${PRESERVE_THINKING}",
-    "depth": "$(effective_depth)",
-    "memory_limit": "${MEMORY_LIMIT_GB}",
-    "batching": "${BATCHING_PRESET}",
-    "host": "${HOST}",
-    "port": "${PORT}",
-    "chip": "$(sysctl -n machdep.cpu.brand_string 2>/dev/null || echo 'Apple Silicon')",
-    "macos": "$(macos_version)",
-}))
-PY
-)"
-export AIOS_DASH_CFG="$CONFIG_JSON"
-
+export AIOS_DASH_CFG_FILE="$DASH_CFG_FILE"
 exec python3 "$REPO_DIR/lib/dashboard.py" "$@"

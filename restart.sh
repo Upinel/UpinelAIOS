@@ -14,9 +14,15 @@
 # Restart the UpinelAIOS server, reloading env.conf.
 #
 #   ./restart.sh              graceful stop, then start with the current env.conf
+#   ./restart.sh --model X    switch to a model (and therefore an engine)
 #   ./restart.sh --force      SIGKILL on stop if the graceful path hangs
 #   ./restart.sh --wait 5     extra seconds to let the port and GPU settle
 #   ./restart.sh --print      show what would start, and whether config changed
+#
+# --model is how you change engines: a GGUF model runs on llama.cpp, an MTPLX
+# pack on MTPLX, so naming one is the whole switch. It lasts for this run only,
+# exactly like ./start.sh --model; set MODEL in env.conf to make it permanent.
+# With no --model and a terminal attached, you get the picker instead.
 #
 # Editing env.conf has no effect until the server is restarted, because the
 # settings are passed to llama-server as command-line arguments at launch. This
@@ -29,11 +35,13 @@ load_config
 FORCE=0
 SETTLE=3
 PRINT_ONLY=0
+MODEL_OVERRIDE=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --force)  FORCE=1 ;;
     --wait)   SETTLE="$2"; shift ;;
     --print)  PRINT_ONLY=1 ;;
+    --model)  MODEL_OVERRIDE="$2"; shift ;;
     -h|--help) show_usage "$0"; exit 0 ;;
     *) die "Unknown argument: $1  (try --help)" ;;
   esac
@@ -65,7 +73,24 @@ EFFECTIVE_DEPTH="$(effective_depth)"
 # one model and the restart would load another. start.sh runs the same picker,
 # so the choice is handed over as --model to stop it asking twice.
 PICKED=0
-if (( ! PRINT_ONLY )); then
+if [[ -n "$MODEL_OVERRIDE" ]]; then
+  # A named model is the switch, so no picker. Validate it here rather than
+  # letting start.sh fail after the old server has already been stopped.
+  MODEL_REPO="$(model_repo_for "$MODEL_OVERRIDE")"
+  MODEL_ALIAS="$(alias_for_repo "$MODEL_REPO")"
+  MODEL_DIR="$MODELS_DIR/${MODEL_REPO//\//--}"
+  ENGINE_OV="$(model_engine_for "${MODEL_ALIAS:-$MODEL_REPO}")"
+  [[ -n "$ENGINE_OV" ]] || ENGINE_OV="$(engine_for_dir "$MODEL_DIR" 2>/dev/null || true)"
+  [[ -n "$ENGINE_OV" ]] || ENGINE_OV="gguf"
+  load_engine "$ENGINE_OV" >/dev/null 2>&1 || true
+  if ! engine_model_ok "$MODEL_DIR" 2>/dev/null; then
+    warn "$MODEL_OVERRIDE is not on disk yet - it would be the only thing to start."
+    warn "Fetch it first:  ./model_download.sh $MODEL_OVERRIDE"
+    die "Nothing to restart onto."
+  fi
+  PICKED=1
+  info "Switching to $MODEL_REPO ($ENGINE_OV). This run only - set MODEL in env.conf to keep it."
+elif (( ! PRINT_ONLY )); then
   if choose_model_on_disk; then
     PICKED=1
     info "Serving $MODEL_REPO for this run. Set MODEL in env.conf to make it permanent."
@@ -74,15 +99,26 @@ fi
 
 # Resolve the engine before the banner, so it reports the shape the server
 # will actually start with rather than one engine's fields on the other's run.
-MODEL_REPO_R="$(model_repo_for "$MODEL")"
-MODEL_ALIAS_R="$(alias_for_repo "$MODEL_REPO_R")"
+#
+# When a model was picked or named, that is what is about to start - reading
+# $MODEL here instead would print the env.conf model in the banner and then
+# load the other one, which is the exact confusion this banner exists to stop.
+if (( PICKED )); then
+  MODEL_REPO_R="$MODEL_REPO"
+  MODEL_ALIAS_R="$MODEL_ALIAS"
+else
+  MODEL_REPO_R="$(model_repo_for "$MODEL")"
+  MODEL_ALIAS_R="$(alias_for_repo "$MODEL_REPO_R")"
+fi
 ENGINE_R="$(model_engine_for "${MODEL_ALIAS_R:-$MODEL_REPO_R}")"
 [[ -n "$ENGINE_R" ]] || ENGINE_R="$(engine_for_dir "$MODELS_DIR/${MODEL_REPO_R//\//--}")"
+[[ -n "$ENGINE_R" ]] || ENGINE_R="gguf"
+EFFECTIVE_DEPTH="$(load_engine "$ENGINE_R" >/dev/null 2>&1; effective_depth)"
 
 log ""
 log "  ${C_BOLD}Starting with:${C_RESET}"
 log "    engine     $(load_engine "$ENGINE_R" >/dev/null 2>&1; engine_name)"
-log "    model      $MODEL_REPO"
+log "    model      $MODEL_REPO_R${MODEL_ALIAS_R:+   ($MODEL_ALIAS_R)}"
 log "    served as  $SERVED_MODEL_NAME"
 log "    context    $CONTEXT_WINDOW   KV $(kv_quant_for "$ENGINE_R")"
 if [[ "$ENGINE_R" == "mlx" ]]; then

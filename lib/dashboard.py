@@ -772,9 +772,13 @@ def truncate(s, width):
 
 
 class Dashboard:
-    def __init__(self, cfg, args):
+    def __init__(self, cfg, args, cfg_path=None):
         self.cfg = cfg
         self.args = args
+        # Where the payload came from, so a model or engine switch can be
+        # noticed without restarting this process. See _reload_cfg().
+        self._cfg_path = cfg_path
+        self._cfg_mtime = self._stat_cfg(cfg_path)
         self.cpu = CPUSampler()
         self.gpu = GPUSampler()
         self.power = PowerSampler() if args.power else None
@@ -807,6 +811,58 @@ class Dashboard:
         self._health_cache = None
         self._props_cache = None
         self._switching_to = None
+
+    # ── live config reload ───────────────────────────────────────────────────
+    @staticmethod
+    def _stat_cfg(path):
+        try:
+            return os.path.getmtime(path)
+        except (OSError, TypeError):
+            return None
+
+    def _reload_cfg(self):
+        """Adopt a new model/engine without being restarted.
+
+        ./start.sh and ./restart.sh rewrite the payload when they launch, so a
+        dashboard left open across a switch - which is the normal way to use it
+        while trying models - shows what is serving now instead of what was
+        serving when it started. Everything the config feeds has to be rebuilt
+        or reset, or the panels would mix the old model's numbers with the new
+        model's name.
+        """
+        path = self._cfg_path
+        mtime = self._stat_cfg(path)
+        if mtime is None or mtime == self._cfg_mtime:
+            return False
+        try:
+            with open(path, encoding="utf-8") as fh:
+                new = json.load(fh)
+        except (OSError, ValueError):
+            # A half-written file is not worth crashing over; try again next tick.
+            return False
+        self._cfg_mtime = mtime
+        if new == self.cfg:
+            return False
+
+        self.cfg = new
+        self.server = ServerSampler(
+            new["base"], new.get("api_key", ""), new.get("model_dir"),
+            new.get("pid_file"), port=new.get("port"),
+            log_file=new.get("log_file"))
+        # Anything derived from the previous model is now wrong.
+        self._log_cache = {}
+        self.log_totals = None
+        self._health_cache = None
+        self._props_cache = None
+        self._clients_cache = (0, [])
+        self._cached_thinking = None
+        self._thinking_checked = 0.0
+        self._pending_thinking = None
+        self.hist_tps.clear()
+        self.status_note = (
+            f"switched to {new.get('model_repo', '?')} ({new.get('engine', '?')})")
+        self.status_note_until = time.time() + 6
+        return True
 
     # ── model discovery ──────────────────────────────────────────────────────
     def downloaded_models(self):
@@ -1532,6 +1588,7 @@ class Dashboard:
     def _loop(self):
         while True:
             started = time.time()
+            self._reload_cfg()
             try:
                 s = self.collect()
             except Exception:                                  # noqa: BLE001
@@ -1678,8 +1735,17 @@ def main():
         print(__doc__)
         return 0
 
-    cfg = json.loads(os.environ["AIOS_DASH_CFG"])
-    dash = Dashboard(cfg, args)
+    # The shell writes the payload to a file and passes its path, so this
+    # process can notice a model switch while it is running. The inline env var
+    # is still honoured for anyone calling the dashboard directly.
+    cfg_path = os.environ.get("AIOS_DASH_CFG_FILE") or None
+    if cfg_path and os.path.exists(cfg_path):
+        with open(cfg_path, encoding="utf-8") as fh:
+            cfg = json.load(fh)
+    else:
+        cfg_path = None
+        cfg = json.loads(os.environ["AIOS_DASH_CFG"])
+    dash = Dashboard(cfg, args, cfg_path=cfg_path)
 
     if args.once or args.json:
         snap = dash.collect()

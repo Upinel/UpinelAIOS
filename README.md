@@ -337,13 +337,15 @@ row marked with a verdict for *your* memory:
   ---  -------------- ------ -------------------- ------------------------------------
     1  gguf-g-26ba4b   15 GB  RECOMMENDED          uncensored MoE, 3B active - the fastest 26B here
     2  gguf-g-12b       8 GB  fits comfortably     dense 12B - smaller and less capable, still quick
+    3  gguf-g-31b      20 GB  fits comfortably     dense 31B abliterated - the highest quality, and the slowest
     ...
     6  gguf-q-27b      19 GB  fits comfortably     dense 27B, ~13.5 t/s; its MTP head needs a build step
+    7  gguf-q-9b        6 GB  fits comfortably     dense 9B, ~44 t/s - the MLX build is about twice this
     ...
     9  mlx-q-35ba3b    22 GB  fits comfortably     35B MoE, ~3B active - fastest Qwen here (~98 t/s)
-   10  mlx-q-27b-4bit  19 GB  fits comfortably     dense 27B 4-bit - the quality pick (~35 t/s)
+   10  mlx-q-27b-4bit  19 GB  fits comfortably     dense 27B 4-bit - the quality pick (~30 t/s)
     ...
-   14  mlx-q-9b         6 GB  fits comfortably     dense 9B (~65 t/s) - only when memory is tight
+   14  mlx-q-9b         6 GB  fits comfortably     dense 9B (~90 t/s) - only when memory is tight
   Model number:
 ```
 
@@ -682,7 +684,7 @@ token. Every model below is uncensored.
 | `gguf-q-35ba3b` &nbsp;Qwen 3.6 35B-A3B | 70.5 t/s | 180 t/s | 2.7 s | Works, but the **MLX engine** runs this same model faster. |
 | `gguf-g-e4b` &nbsp;Gemma 4 E4B | 63.9 t/s | 84 t/s | 0.4 s | Only when the Mac genuinely cannot fit `gguf-g-26ba4b`. |
 | `gguf-g-12b` &nbsp;Gemma 4 12B | 54.5 t/s | 81 t/s | 2.6 s | The largest model that still fits a **16 GB** Mac. `gguf-g-e2b` is nearly twice as fast, so pick it for capability, not speed. |
-| `gguf-q-9b` &nbsp;Qwen 3.8 9B | 44.3 t/s | 130 t/s | 4.1 s | Use the **MLX** build instead — ~47% faster there. |
+| `gguf-q-9b` &nbsp;Qwen 3.8 9B | 44.3 t/s | 130 t/s | 4.1 s | Use the **MLX** build instead — about twice this (~90 t/s). |
 | `gguf-q-27b` &nbsp;Qwen 3.8 27B | 13.5 t/s | 133 t/s | 9.1 s | Use the **MLX** build instead — ~2.2× faster there. |
 
 **The default is also the fastest, which is the point.** `gguf-g-26ba4b` leads on decode

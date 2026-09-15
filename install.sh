@@ -86,6 +86,15 @@ fi
 # different offers - Gemma at peak decode versus Qwen up to 2.2x faster - so
 # both are shown with the measured reason to want each.
 #
+# Five ways to settle the model:
+#   1  take the GGUF suggestion      - one model, already checked against RAM
+#   2  take the MLX suggestion       - ditto, the other runtime
+#   3  take both                     - both runtimes, both models
+#   4  pick from the list we ship    - any alias, with a verdict for this Mac
+#   5  type an owner/name repo       - anything uncensored on Hugging Face
+# An engine with nothing that fits drops out, so 2 is absent on a Mac where no
+# MLX model loads; the remaining options renumber rather than leaving a gap.
+#
 # Skipped when the model was named explicitly, when --yes was given, or when
 # there is no terminal to ask on.
 # One row of the engine menu. A function so the menus below - both engines,
@@ -138,6 +147,23 @@ ask_custom_model() {
   return 0
 }
 
+# Pick one of the models we ship, from the same list ./start.sh uses. Sets
+# MODEL and ENGINE_FORCED, and returns non-zero when the user declined or
+# picked something there is no room for - so the caller can fall back to its
+# own suggestion rather than leaving MODEL unset.
+pick_from_list() {
+  if ! choose_model_from_list; then
+    return 1
+  fi
+  if ! adopt_model_alias "$MENU_CHOSEN_ALIAS"; then
+    return 1
+  fi
+  MODEL="$REC_MODEL"
+  ENGINE_FORCED="$(model_engine_for "$MENU_CHOSEN_ALIAS")"
+  info "$(printf '%s' "$ENGINE_FORCED" | tr '[:lower:]' '[:upper:]'): $MENU_CHOSEN_ALIAS"
+  return 0
+}
+
 DO_BOTH=0
 ENGINE_FORCED=""
 if [[ -z "$MODEL_OVERRIDE" ]] && (( DO_SCAN )) && (( ! ASSUME_YES )); then
@@ -156,7 +182,8 @@ if [[ -z "$MODEL_OVERRIDE" ]] && (( DO_SCAN )) && (( ! ASSUME_YES )); then
       menu_row 1 GGUF "$REC_GGUF_ALIAS" "$REC_GGUF_WEIGHTS" "$REC_GGUF_NOTE"
       menu_row 2 MLX  "$REC_MLX_ALIAS"  "$REC_MLX_WEIGHTS"  "$REC_MLX_NOTE"
       menu_row 3 both "install both engines and both models" "" ""
-      menu_row 4 your "your own Hugging Face repo" "" "any uncensored owner/name"
+      menu_row 4 list "pick any model we ship" "" "with a verdict for this Mac"
+      menu_row 5 yours "type a Hugging Face repo id" "" "any uncensored owner/name"
       # "fits" and "only just fits" are different promises, and this menu is
       # where the choice is made - so the verdict belongs here too, not only in
       # the scan table above.
@@ -172,7 +199,7 @@ if [[ -z "$MODEL_OVERRIDE" ]] && (( DO_SCAN )) && (( ! ASSUME_YES )); then
       log "  3 costs about $((${REC_GGUF_WEIGHTS} + ${REC_MLX_WEIGHTS})) GB of disk.${C_RESET}"
       log ""
 
-      printf "  Choose [1/2/3/4]: "
+      printf "  Choose [1/2/3/4/5]: "
       read_pick
       case "${PICK:-1}" in
         2) MODEL="$(model_repo_for "$REC_MLX_ALIAS")"
@@ -180,9 +207,13 @@ if [[ -z "$MODEL_OVERRIDE" ]] && (( DO_SCAN )) && (( ! ASSUME_YES )); then
         3) DO_BOTH=1
            MODEL="$(model_repo_for "$REC_GGUF_ALIAS")"
            info "Both engines, starting with GGUF: $REC_GGUF_ALIAS" ;;
-        4) if ! ask_custom_model; then
+        4) if ! pick_from_list; then
              MODEL="$(model_repo_for "$REC_GGUF_ALIAS")"
-             info "GGUF: $REC_GGUF_ALIAS"
+             info "Keeping the GGUF suggestion: $REC_GGUF_ALIAS"
+           fi ;;
+        5) if ! ask_custom_model; then
+             MODEL="$(model_repo_for "$REC_GGUF_ALIAS")"
+             info "Keeping the GGUF suggestion: $REC_GGUF_ALIAS"
            fi ;;
         *) MODEL="$(model_repo_for "$REC_GGUF_ALIAS")"
            info "GGUF: $REC_GGUF_ALIAS" ;;
@@ -206,7 +237,8 @@ if [[ -z "$MODEL_OVERRIDE" ]] && (( DO_SCAN )) && (( ! ASSUME_YES )); then
       step "Suggested model"
       log ""
       menu_row 1 "$S_ENGINE" "$S_ALIAS" "$S_GB" "$S_NOTE"
-      menu_row 2 your "your own Hugging Face repo" "" "any uncensored owner/name"
+      menu_row 2 list "pick any model we ship" "" "with a verdict for this Mac"
+      menu_row 3 yours "type a Hugging Face repo id" "" "any uncensored owner/name"
       log ""
       log "  ${C_DIM}No ${M_ENGINE} model is offered: the smallest one, ${M_NAME},"
       log "  needs about ${M_NEED} GB and this Mac has ${HW_RAM_GB} GB.${C_RESET}"
@@ -215,12 +247,16 @@ if [[ -z "$MODEL_OVERRIDE" ]] && (( DO_SCAN )) && (( ! ASSUME_YES )); then
       fi
       log ""
 
-      printf "  Choose [1/2]: "
+      printf "  Choose [1/2/3]: "
       read_pick
       case "${PICK:-1}" in
-        2) if ! ask_custom_model; then
+        2) if ! pick_from_list; then
              MODEL="$(model_repo_for "$S_ALIAS")"
-             info "$S_ENGINE: $S_ALIAS"
+             info "Keeping the suggestion: $S_ALIAS"
+           fi ;;
+        3) if ! ask_custom_model; then
+             MODEL="$(model_repo_for "$S_ALIAS")"
+             info "Keeping the suggestion: $S_ALIAS"
            fi ;;
         *) MODEL="$(model_repo_for "$S_ALIAS")"
            info "$S_ENGINE: $S_ALIAS" ;;

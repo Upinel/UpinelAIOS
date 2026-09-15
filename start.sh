@@ -197,6 +197,10 @@ case "$RC" in
     log ""
     log "  Watch it live:  ./status.sh"
     log "  Stop:           ./stop.sh"
+    # Rewrite the dashboard payload now that something is actually serving.
+    # A dashboard left open - ./status.sh in another window while trying
+    # models - re-reads it and follows the switch rather than going stale.
+    write_dashboard_payload >/dev/null 2>&1 || true
     ;;
   2)
     rm -f "$PID_FILE"

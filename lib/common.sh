@@ -104,7 +104,7 @@ show_usage() {
 #
 # The two families are NOT interchangeable on speed. A dense 27B reads ~15 GB of
 # weights per token through llama.cpp and manages ~13.5 t/s; the same model
-# through MLX reaches ~34.7 t/s, because MTPLX's MTP implementation works on
+# through MLX reaches ~30 t/s, because MTPLX's MTP implementation works on
 # Metal and llama.cpp's does not. The MLX aliases exist to collect that.
 #
 # NOTE: a case statement, not an associative array. macOS ships bash 3.2,
@@ -1240,6 +1240,116 @@ diff_config_snapshot() {
   [[ -n "$changed" ]] || return 1
   printf '%s\n' "$changed"
   return 0
+}
+
+# ── the dashboard payload ────────────────────────────────────────────────────
+# Written to a file rather than passed inline, so a dashboard that is already
+# running can notice that ./restart.sh switched model or engine and follow it,
+# instead of showing the model that was serving when it started.
+#
+# Values are handed to python through the environment, not interpolated into
+# the source: a model id or a path is data, and building code out of data is
+# how a quote in a filename becomes a syntax error.
+write_dashboard_payload() {
+  local repo="${1:-$MODEL_REPO}"
+  local alias eng dir out
+  alias="$(alias_for_repo "$repo" 2>/dev/null || true)"
+  eng="$(model_engine_for "${alias:-$repo}" 2>/dev/null || true)"
+  [[ -n "$eng" ]] || eng="$(engine_for_dir "$MODELS_DIR/${repo//\//--}" 2>/dev/null || true)"
+  [[ -n "$eng" ]] || eng="gguf"
+  dir="$MODELS_DIR/${repo//\//--}"
+  load_engine "$eng" >/dev/null 2>&1 || true
+
+  STATUS_MAIN=""; STATUS_WEIGHTS_GB=0; STATUS_VISION_GB=0
+  engine_status_extras "$dir" 2>/dev/null || true
+
+  out="${DASH_CFG_FILE:-$RUN_DIR/dashboard-cfg.json}"
+  mkdir -p "$(dirname "$out")"
+
+  AIOS_BASE="http://127.0.0.1:$PORT/v1" \
+  AIOS_LAN="http://$(lan_ip 2>/dev/null || echo 127.0.0.1):$PORT/v1" \
+  AIOS_KEY_FILE="$API_KEY_FILE" \
+  AIOS_PID_FILE="$PID_FILE" \
+  AIOS_LOG_FILE="$LOG_FILE" \
+  AIOS_ERR_LOG="$RUN_DIR/dashboard.err" \
+  AIOS_MODELS_DIR="$MODELS_DIR" \
+  AIOS_REPO_DIR="$REPO_DIR" \
+  AIOS_ENV_FILE="$ENV_FILE" \
+  AIOS_MODEL_DIR="$dir" \
+  AIOS_MODEL="$MODEL" \
+  AIOS_SERVED="$SERVED_MODEL_NAME" \
+  AIOS_MODEL_REPO="$repo" \
+  AIOS_ENGINE="$eng" \
+  AIOS_MAIN_GGUF="${STATUS_MAIN:-}" \
+  AIOS_WEIGHTS_GB="${STATUS_WEIGHTS_GB:-0}" \
+  AIOS_VISION_GB="${STATUS_VISION_GB:-0}" \
+  AIOS_KV_GB="$(( CONTEXT_WINDOW * $(kv_kb_for_engine "$eng") / 1024 / 1024 ))" \
+  AIOS_SLOTS="${PARALLEL_SLOTS:-1}" \
+  AIOS_CONTEXT="$CONTEXT_WINDOW" \
+  AIOS_KV="$(kv_quant_for "$eng")" \
+  AIOS_PROFILE="${PROFILE:-}" \
+  AIOS_THINKING="${THINKING:-}" \
+  AIOS_PRESERVE="${PRESERVE_THINKING:-}" \
+  AIOS_DEPTH="$(effective_depth 2>/dev/null || echo 3)" \
+  AIOS_MEM_LIMIT="${MEMORY_LIMIT_GB:-0}" \
+  AIOS_BATCHING="${BATCHING_PRESET:-}" \
+  AIOS_HOST="$HOST" AIOS_PORT="$PORT" \
+  AIOS_CHIP="$(sysctl -n machdep.cpu.brand_string 2>/dev/null || echo 'Apple Silicon')" \
+  AIOS_MACOS="$(macos_version 2>/dev/null || echo '?')" \
+  AIOS_OUT="$out" \
+  python3 - <<'PYEOF'
+import json, os
+e = os.environ
+key = ""
+kf = e.get("AIOS_KEY_FILE", "")
+if kf and os.path.exists(kf):
+    try:
+        with open(kf) as fh:
+            key = fh.read().strip()
+    except OSError:
+        key = ""
+ctx = e.get("AIOS_CONTEXT", "0")
+payload = {
+    "base": e["AIOS_BASE"],
+    "lan_url": e["AIOS_LAN"],
+    "api_key": key,
+    "api_key_file": kf,
+    "pid_file": e["AIOS_PID_FILE"],
+    "log_file": e["AIOS_LOG_FILE"],
+    "error_log": e["AIOS_ERR_LOG"],
+    "models_dir": e["AIOS_MODELS_DIR"],
+    "repo_dir": e["AIOS_REPO_DIR"],
+    "env_file": e["AIOS_ENV_FILE"],
+    "model_dir": e["AIOS_MODEL_DIR"],
+    "model": e["AIOS_MODEL"],
+    "served_name": e["AIOS_SERVED"],
+    "model_repo": e["AIOS_MODEL_REPO"],
+    "engine": e["AIOS_ENGINE"],
+    "main_gguf": e.get("AIOS_MAIN_GGUF", ""),
+    "weights_gb": e.get("AIOS_WEIGHTS_GB", "0"),
+    "kv_gb": e.get("AIOS_KV_GB", "0"),
+    "vision_gb": e.get("AIOS_VISION_GB", "0"),
+    "slots": e.get("AIOS_SLOTS", "1"),
+    "context": ctx,
+    "ctx": ctx,
+    "kv": e.get("AIOS_KV", ""),
+    "profile": e.get("AIOS_PROFILE", ""),
+    "thinking": e.get("AIOS_THINKING", ""),
+    "preserve_thinking": e.get("AIOS_PRESERVE", ""),
+    "depth": e.get("AIOS_DEPTH", ""),
+    "memory_limit": e.get("AIOS_MEM_LIMIT", "0"),
+    "batching": e.get("AIOS_BATCHING", ""),
+    "host": e.get("AIOS_HOST", ""),
+    "port": e.get("AIOS_PORT", ""),
+    "chip": e.get("AIOS_CHIP", ""),
+    "macos": e.get("AIOS_MACOS", ""),
+}
+tmp = e["AIOS_OUT"] + ".tmp"
+with open(tmp, "w", encoding="utf-8") as fh:
+    json.dump(payload, fh, indent=1)
+os.replace(tmp, e["AIOS_OUT"])
+PYEOF
+  printf '%s\n' "$out"
 }
 
 # ── memory arithmetic ────────────────────────────────────────────────────────

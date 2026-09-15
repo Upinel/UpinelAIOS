@@ -39,6 +39,7 @@ SUITES="
 bench/verify-legacy-aliases.py
 bench/verify-engine-suggest.py
 bench/verify-bench-prompt.py
+bench/verify-dashboard-reload.py
 bench/verify-kv-table.py
 bench/verify-engine-contract.py
 bench/verify-model-picker.py

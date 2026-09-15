@@ -395,15 +395,15 @@ model_note() {
     gguf-g-e4b)      echo "loses to both e2b and the 26B on every axis" ;;
     gguf-g-e2b)      echo "smallest, and the fastest small model: fits an 8 GB Mac" ;;
     gguf-q-27b)      echo "dense 27B, ~13.5 t/s; its MTP head needs a build step - or use the MLX build (~2.2x faster)" ;;
-    gguf-q-9b)       echo "dense 9B, ~44 t/s - the MLX build is ~47% faster on this model" ;;
+    gguf-q-9b)       echo "dense 9B, ~44 t/s - the MLX build is about twice this (~90 t/s)" ;;
     gguf-q-35ba3b)   echo "MoE like the default, different family (Qwen 3.6, not 3.8)" ;;
     # ── MLX ──
     mlx-q-35ba3b)    echo "35B MoE, ~3B active - fastest Qwen here (~98 t/s), best agent balance" ;;
-    mlx-q-27b-4bit)  echo "dense 27B 4-bit - the quality pick (~35 t/s)" ;;
+    mlx-q-27b-4bit)  echo "dense 27B 4-bit - the quality pick (~30 t/s)" ;;
     mlx-q-27b-6bit)  echo "dense 27B 6-bit - closer to the original weights, slower" ;;
     mlx-q-27b-3bit)  echo "dense 27B at 3-bit - smallest 27B, some quality loss" ;;
     mlx-q-27b-4bit-bz) echo "another 27B 4-bit conversion, 1 GB bigger than mlx-q-27b-4bit" ;;
-    mlx-q-9b)        echo "dense 9B (~65 t/s) - only when memory is tight" ;;
+    mlx-q-9b)        echo "dense 9B (~90 t/s) - only when memory is tight" ;;
     *)           echo "" ;;
   esac
 }
@@ -475,6 +475,55 @@ print_model_menu() {
   printf '  Model number: '
 }
 
+# Print the full list and read a choice.
+#
+# Sets MENU_CHOSEN_ALIAS; returns 0 only when a real model was chosen, so a
+# caller can treat "declined" and "picked" without re-parsing anything. Shared
+# by install.sh's "pick from our list" option and by the "not that model" path
+# below, so the two can never show different lists or different verdicts.
+choose_model_from_list() {
+  local pick idx=1 a
+  MENU_CHOSEN_ALIAS=""
+  print_model_menu
+  if [[ -t 0 ]]; then read -r pick || pick=""; else read -r pick < /dev/tty || pick=""; fi
+  pick="${pick//[!0-9]/}"
+  [[ -n "$pick" ]] || return 1
+  for a in $MODEL_MENU_ALIASES; do
+    if (( idx == pick )); then MENU_CHOSEN_ALIAS="$a"; return 0; fi
+    idx=$(( idx + 1 ))
+  done
+  warn "No model number $pick."
+  return 1
+}
+
+# Accept an alias the user picked: say how it fits, check there is room for it,
+# and point REC_MODEL at it. Returns 1 when it should not be adopted.
+#
+# The disk check is the reason this is shared rather than duplicated: the
+# earlier scan checked space for the SUGGESTED model, so a larger pick has to
+# be re-checked or the download dies part way through.
+adopt_model_alias() {
+  local chosen="$1" fit verdict wgb
+  fit="$(model_fit "$chosen")"; verdict="${fit#* }"
+  wgb="$(model_size_gb "$(model_repo_for "$chosen" 2>/dev/null)" 2>/dev/null || echo 0)"
+  log ""
+  if [[ "$verdict" == "will not fit" ]]; then
+    warn "$chosen needs about ${fit%% *} GB and this Mac has ${HW_RAM_GB} GB."
+    warn "It will be slow at best and may fail to load. Choosing it anyway."
+  elif [[ "$verdict" == tight* ]]; then
+    warn "$chosen needs about ${fit%% *} GB on a ${HW_RAM_GB} GB Mac - expect paging."
+  fi
+  if (( wgb > 0 )) && (( ${HW_FREE_GB:-0} > 0 )) && (( HW_FREE_GB < wgb + 3 )); then
+    warn "$chosen downloads about ${wgb} GB and only ${HW_FREE_GB} GB is free."
+    warn "Free up space, or set MODELS_DIR in env.conf to a bigger volume."
+    return 1
+  fi
+  REC_MODEL="$(model_repo_for "$chosen")"
+  REC_ALIAS="$chosen"
+  (( wgb > 0 )) && REC_WEIGHTS_GB="$wgb"
+  return 0
+}
+
 # ── the interactive step ─────────────────────────────────────────────────────
 # Returns 0 if config is ready to use, 1 if the user aborted.
 run_preflight() {
@@ -541,46 +590,12 @@ run_preflight() {
     n|N|no|NO)
       # Declining the whole suggestion usually means "not that model". Offer
       # the list with a per-machine verdict rather than just giving up.
-      print_model_menu
-      local pick=""
-      read -r pick < /dev/tty || pick=""
-      pick="${pick//[!0-9]/}"
-      if [[ -z "$pick" ]]; then
+      if choose_model_from_list && adopt_model_alias "$MENU_CHOSEN_ALIAS"; then
+        info "Using $MENU_CHOSEN_ALIAS. The other suggested settings still apply."
+        apply_config
+      else
         info "Keeping your current env.conf."
-        return 0
       fi
-      local idx=1 chosen="" a
-      for a in $MODEL_MENU_ALIASES; do
-        if (( idx == pick )); then chosen="$a"; break; fi
-        idx=$(( idx + 1 ))
-      done
-      if [[ -z "$chosen" ]]; then
-        warn "No model number $pick; keeping your current env.conf."
-        return 0
-      fi
-      local fit verdict wgb
-      fit="$(model_fit "$chosen")"; verdict="${fit#* }"
-      REC_MODEL="$(model_repo_for "$chosen")"
-      REC_ALIAS="$chosen"
-      wgb="$(model_size_gb "$REC_MODEL")"
-      log ""
-      if [[ "$verdict" == "will not fit" ]]; then
-        warn "$chosen needs about ${fit%% *} GB and this Mac has ${HW_RAM_GB} GB."
-        warn "It will be slow at best and may fail to load. Choosing it anyway."
-      elif [[ "$verdict" == tight* ]]; then
-        warn "$chosen needs about ${fit%% *} GB on a ${HW_RAM_GB} GB Mac - expect paging."
-      fi
-      # The disk check above ran against the SUGGESTED model's size, so a larger
-      # pick has to be re-checked or the download dies half way through.
-      if (( wgb > 0 )) && (( HW_FREE_GB < wgb + 3 )); then
-        warn "$chosen downloads about ${wgb} GB and only ${HW_FREE_GB} GB is free."
-        warn "Free up space, or set MODELS_DIR in env.conf to a bigger volume."
-        info "Keeping your current env.conf."
-        return 0
-      fi
-      info "Using $chosen. The other suggested settings still apply."
-      (( wgb > 0 )) && REC_WEIGHTS_GB="$wgb"
-      apply_config
       ;;
     *)         apply_config ;;
   esac

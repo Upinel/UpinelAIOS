@@ -165,8 +165,8 @@ they are:
 | model | shape | active per token | decode here (GGUF) | MLX |
 |---|---|---:|---:|---:|
 | `gguf-g-26ba4b` (Gemma 4) | MoE, 8 of 128 experts | ~4B | **106.4 t/s** | — |
-| `gguf-q-9b` | dense | 9B | 44.3 t/s | 65.1 t/s |
-| `gguf-q-27b` | dense | 27B | 13.5 t/s | 34.7 t/s |
+| `gguf-q-9b` | dense | 9B | 44.3 t/s | ~90 t/s |
+| `gguf-q-27b` | dense | 27B | 13.5 t/s | ~30 t/s |
 
 If you want Qwen 27B speed, the honest answer is the **MLX engine**: MTPLX's MTP
 implementation works on Metal and llama.cpp's does not. Both engines ship in
