@@ -8,3 +8,6 @@ run/
 outputs/
 .DS_Store
 __pycache__/
+
+# env.conf backups made by ./update_env.sh - the user's, not the repo's.
+env.conf.bak-*

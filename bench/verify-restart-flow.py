@@ -180,6 +180,13 @@ def stop_if_we_started_it(was):
 
 def main():
     print("\n  Model picker path in start/restart\n")
+    # These drives are real runs, not --print, so the pickers SAVE what they are
+    # told. Checking an answer therefore changes the user's config - which is
+    # how a suite run left EXPERT_PROFILE=writer behind. Restored at the end,
+    # whatever happens.
+    env_file = os.path.join(REPO, "env.conf")
+    env_backup = env_file + ".verify-flow"
+    shutil.copyfile(env_file, env_backup)
     before = server_pid()
     # Belt and braces: if anything here wedges, say so and exit rather than
     # taking the whole suite with it.
@@ -285,6 +292,13 @@ def main():
 
     if stop_if_we_started_it(before):
         print("  (stopped a server this test started)")
+
+    # Put the configuration back, and clean up any backup the scripts made.
+    shutil.copyfile(env_backup, env_file)
+    os.unlink(env_backup)
+    for f in os.listdir(REPO):
+        if f.startswith("env.conf.bak-"):
+            os.unlink(os.path.join(REPO, f))
 
     print(f"\n  {PASSED} passed, {FAILED} failed\n")
     return 1 if FAILED else 0

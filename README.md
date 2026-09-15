@@ -983,43 +983,62 @@ something a flag will fix.
 
 ### Updating the code
 
-This is a git checkout, so updating means pulling. There is no update script:
-`./model_download.sh` is for models, and this is for code.
-
 ```bash
 git pull
+./update_env.sh       # if pull could not update env.conf for you
 ./restart.sh          # to run the new code
 ```
 
-**If `git pull` refuses**, that is expected and easy to fix. `env.conf` is
-tracked, and editing it is the whole point of the project, so git stops with:
+**If `git pull` refuses**, that is expected. `env.conf` is tracked, and editing
+it is the whole point of the project, so git stops with:
 
 ```
 error: Your local changes to the following files would be overwritten by merge:
         env.conf
 ```
 
-Set your settings aside, pull, and put them back:
+Let git have its way, then put your settings back on top:
+
+```bash
+git checkout -- env.conf    # take upstream's, known good
+git pull
+./update_env.sh             # your values, this version's file
+./restart.sh
+```
+
+`./update_env.sh` takes the shipped `env.conf` — every new key, every new
+comment, every changed default — and puts your values back into it:
+
+```
+  New settings this checkout adds (shipped defaults)
+    EXPERT_PROFILE             "speed"
+
+  Your settings (yours is kept either way)
+    KV_QUANT                   "q8_0"  (this version ships "f16")
+    MODEL                      "mlx-q-9b"  (this version ships "gguf-g-26ba4b")
+    THINKING                   "medium"  (this version ships "low")
+```
+
+That second block is the reason the script exists. A setting whose *default*
+changed keeps behaving the old way if you never hear about it — that is how a
+machine ends up on the slower KV quantisation for months with nothing to show
+for it. Yours is kept either way; you just get told.
+
+It backs `env.conf` up first, is safe to run twice, and `--dry-run` shows the
+diff without touching anything. If you would rather do it by hand, the old
+recipe still works — but it can only restore the keys your file already had, so
+anything added since is silently missing:
 
 ```bash
 git stash push -m "my settings" -- env.conf
 git pull
-git stash pop
+git stash pop       # conflict here means: take theirs, then re-apply yours
 ./restart.sh
 ```
 
-If upstream changed the same lines you did, `git stash pop` reports a conflict
-and leaves `<<<<<<<` markers in `env.conf`. **Do not leave it like that** —
-`env.conf` is what every script sources, so a conflicted one breaks the whole
-project. Take upstream's version and recover yours from the stash:
-
-```bash
-git checkout HEAD -- env.conf      # upstream's, known good
-git stash show -p stash@{0}        # see what you had
-git checkout stash@{0} -- env.conf # or just restore yours and edit it
-git stash drop                     # once you are happy
-./restart.sh
-```
+> A conflicted `env.conf` with `<<<<<<<` markers in it breaks every script that
+> sources it. If that happens, `git checkout HEAD -- env.conf` and start again
+> with `./update_env.sh`.
 
 **To see what changed before you commit to it:**
 

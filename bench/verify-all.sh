@@ -49,6 +49,7 @@ bench/verify-kv-table.py
 bench/verify-chip-tier.py
 bench/verify-engine-contract.py
 bench/verify-profiles.py
+bench/verify-env-migration.py
 bench/verify-restart-flow.py
 bench/verify-model-picker.py
 bench/verify-quant-select.py
