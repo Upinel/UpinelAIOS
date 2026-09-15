@@ -48,8 +48,9 @@ source "$1/lib/common.sh"
 kv_kb_per_token_f16 "$2"
 '''
 
-# One base model, both engines' repos for it. The values are what the tables
-# must hold; the metadata check below re-derives them from the weights.
+# One base model, every alias repo that serves it, and the KB/token the table
+# must hold. The values are derived from the weights by bench/kv-from-gguf.py;
+# the metadata check below re-derives them rather than trusting this list.
 MODELS = [
     ("Qwen3.8-9B",
      ["mradermacher/Qwen3.8-9B-heretic-uncensored-i1-GGUF",
@@ -63,6 +64,14 @@ MODELS = [
       "hawhyhb/Qwen3.6-35B-A3B-Uncensored-Heretic-MTPLX-4bit-FP16"], 20),
     ("Gemma-4-26B-A4B",
      ["OS-Software/gemma-4-26B-A4B-it-qat-q4_0-heretic-ja-GGUF"], 20),
+    ("Gemma-4-12B",
+     ["HauhauCS/Gemma4-12B-QAT-Uncensored-HauhauCS-Balanced"], 16),
+    ("Gemma-4-31B",
+     ["llmfan46/gemma-4-31B-it-uncensored-heretic-GGUF"], 80),
+    ("Gemma-4-E4B",
+     ["HauhauCS/Gemma-4-E4B-Uncensored-HauhauCS-Aggressive"], 28),
+    ("Gemma-4-E2B",
+     ["HauhauCS/Gemma-4-E2B-Uncensored-HauhauCS-Aggressive"], 14),
 ]
 
 PASSED = 0
@@ -205,6 +214,27 @@ def main():
     check("the 27B is no longer the old 260", gguf_27 != 260, True)
     check("the 9B is no longer the old 128",
           table_kb("Foresee/Qwen3.8-9B-heretic-uncensored-4bit-MTPLX") != 128, True)
+
+    # Two Gemma rows were wrong in the direction that matters: too low makes a
+    # model the Mac cannot hold look comfortable. The 31B was estimated at 40
+    # and is 80 - a 2x under-report.
+    #
+    # The impact, stated precisely because it is easy to overstate: this does
+    # not flip any verdict in the current context ladder. The ladder pairs a
+    # large context with a large Mac, so the 2.5 GB difference at 131k is small
+    # next to 64 GB. What it fixes is the reported memory being wrong by half,
+    # and the margin on any Mac that is genuinely close to its limit.
+    check("the 31B is no longer the old 40",
+          table_kb("llmfan46/gemma-4-31B-it-uncensored-heretic-GGUF") != 40, True)
+    check("the E4B is no longer the old 16",
+          table_kb("HauhauCS/Gemma-4-E4B-Uncensored-HauhauCS-Aggressive") != 16, True)
+
+    # And the direction itself, since that is the thing that does the harm:
+    # no row may claim a model is cheaper than its architecture allows.
+    for name, repos, want in MODELS:
+        for r in repos:
+            check(f"{name}: {r.split('/')[0]} does not under-report KV",
+                  table_kb(r) >= want, True)
 
     print(f"\n  {PASSED} passed, {FAILED} failed\n")
     return 1 if FAILED else 0

@@ -839,6 +839,13 @@ model_dir_gb() {
 
 # Is this directory a model that will actually load?
 #
+# MLX ONLY, despite the generic name. It looks for safetensors shards, so it
+# answers "no" for every GGUF model. Ask engine_model_ok() instead when the
+# engine is not known to be mlx. The two deliberate exceptions are
+# engine_for_dir() below, which uses this to sniff the engine from a
+# directory, and install.sh's "both" path, which applies it to a model already
+# known to be MLX. Every other caller wants engine_model_ok().
+#
 # Not "does it contain a safetensors file": a download in progress leaves a
 # directory with the first shards in it, and offering that in the picker
 # produces exactly the failure the picker exists to prevent. Packs ship
@@ -1272,13 +1279,13 @@ kv_gb_for_context() {
 kv_kb_per_token_f16_gguf() {
   case "$1" in
     # Gemma 4 - sliding-window attention, so growth is only the full layers.
-    # Confirmed from the metadata: 30 blocks, 5 with sliding_window_pattern
-    # false, and those 5 are the ones carrying head_count_kv=2 / key_length=512.
-    *q4_0-heretic*|*26B-A4B*) echo 20 ;;   # 5 of 30 full, 4 x 5 x 2 x 512
-    *Gemma4-12B*)             echo 32 ;;   # 48 layers; estimate, not measured
-    *gemma-4-31B*)            echo 40 ;;   # 60 layers; estimate, not measured
-    *Gemma-4-E4B*)            echo 16 ;;
-    *Gemma-4-E2B*)            echo 16 ;;
+    # All five are now derived from the weights rather than estimated;
+    # ./bench/kv-from-gguf.py reproduces each one from the file header alone.
+    *q4_0-heretic*|*26B-A4B*) echo 20 ;;   # 30 blocks,  5 full, 4 x  5 x 2 x 512
+    *Gemma4-12B*)             echo 16 ;;   # 48 blocks,  8 full, 4 x  8 x 1 x 512
+    *gemma-4-31B*)            echo 80 ;;   # 60 blocks, 10 full, 4 x 10 x 4 x 512
+    *Gemma-4-E4B*)            echo 28 ;;   # 42 blocks,  7 full, 4 x  7 x 2 x 512
+    *Gemma-4-E2B*)            echo 14 ;;   # 35 blocks,  7 full, 4 x  7 x 1 x 512
     # Qwen 3.x - hybrid. 4 (K and V, 2 bytes each) x full layers x kv heads x 256.
     *Qwen3.8-27B*)            echo 64 ;;   # 65 blocks, 16 full, 4 x 16 x 4 x 256
     *Qwen3.8-9B*)             echo 32 ;;   # 32 blocks,  8 full, 4 x  8 x 4 x 256
