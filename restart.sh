@@ -122,7 +122,7 @@ log "    model      $MODEL_REPO_R${MODEL_ALIAS_R:+   ($MODEL_ALIAS_R)}"
 log "    served as  $SERVED_MODEL_NAME"
 log "    context    $CONTEXT_WINDOW   KV $(kv_quant_for "$ENGINE_R")"
 if [[ "$ENGINE_R" == "mlx" ]]; then
-  log "    profile    $PROFILE   thinking $THINKING   history $PRESERVE_THINKING"
+  log "    profile    $(engine_resolved_profile "$MODELS_DIR/${MODEL_REPO_R//\//--}")   thinking $THINKING   history $PRESERVE_THINKING"
   log "    memory     ${MEMORY_LIMIT_GB} GB cap   session bank ${SESSION_BANK_GB} GB"
 else
   log "    depth      $EFFECTIVE_DEPTH   thinking $THINKING"

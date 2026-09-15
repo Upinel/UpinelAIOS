@@ -59,6 +59,7 @@ CONTRACT = [
     "engine_serve_word",
     "engine_post_fetch_notes",
     "engine_status_extras",
+    "engine_resolved_profile",
 ]
 
 # Helpers that belong to exactly one engine. Calling one of these from a shared

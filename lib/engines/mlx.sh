@@ -99,6 +99,44 @@ engine_post_fetch_notes() {
   fi
 }
 
+# Which profile to launch with. Empty means "do not pass --profile", letting
+# MTPLX apply its own default.
+#
+# MTPLX documents a per-model rule - Turbo for the quantized 27B and 9B
+# flagships, Sustained otherwise - and Turbo is what selects the NAX (Neural
+# Accelerator) verify kernels; Sustained is the long-context path WITHOUT them.
+# Its CLI does not implement that rule: omitting --profile resolved to Sustained
+# for every pack shipped here, including the 27B.
+#
+# Applying the documented rule here is worth doing because it is measurable.
+# On the 27B at 8k context, median of three cold runs each way:
+#
+#     sustained   26.2 t/s decode   357 t/s prefill
+#     turbo       31.0 t/s decode   366 t/s prefill
+#
+# about 18% more decode, with prefill inside noise. Turbo was verified not to
+# OOM at 131072 context, at a 32k prefill and at a 64k prefill - the OOM that
+# env.conf used to warn about did not reproduce on MTPLX 2.9.1. The 9B measured
+# neutral (90 t/s decode either way) and survived 32768. Models outside the
+# documented rule keep the runtime's own choice rather than being pushed onto
+# Turbo on no evidence.
+# What the dashboard and the restart banner should show. Distinct from
+# mlx_profile_for() because an empty there means "pass no flag", which on
+# screen reads better as "the runtime's own default" than as a blank.
+engine_resolved_profile() {
+  local p; p="$(mlx_profile_for "$1")"
+  printf '%s\n' "${p:-runtime default}"
+}
+
+mlx_profile_for() {
+  local dir="$1"
+  if [[ "$PROFILE" != "auto" ]]; then printf '%s\n' "$PROFILE"; return 0; fi
+  case "$(basename "$dir")" in
+    *Qwen3.8-27B*|*Qwen3.8-9B*) printf 'turbo\n' ;;
+    *)                          printf '\n' ;;
+  esac
+}
+
 # ── command line ─────────────────────────────────────────────────────────────
 engine_build_args() {
   local dir="$1"
@@ -108,9 +146,14 @@ engine_build_args() {
   EFFECTIVE_DEPTH="$(effective_depth)"
   THINKING_ARGS="$(thinking_flags)"
 
-  ARGS=(
-    --model "$dir"
-    --profile "$PROFILE"
+  # Resolve "auto" before building the command line. See mlx_profile_for().
+  local prof; prof="$(mlx_profile_for "$dir")"
+  if [[ -n "$prof" ]]; then
+    ARGS=( --model "$dir" --profile "$prof" )
+  else
+    ARGS=( --model "$dir" )
+  fi
+  ARGS+=(
     --host "$HOST"
     --port "$PORT"
     --context-window "$CONTEXT_WINDOW"
@@ -174,18 +217,24 @@ engine_export_env() {
 }
 
 engine_banner() {
-  log "  MTP depth    ${ENGINE_DEPTH:-auto}              (profile: $PROFILE)"
+  local _prof; _prof="$(mlx_profile_for "${MODEL_DIR:-}")"
+  log "  MTP depth    ${ENGINE_DEPTH:-auto}              (profile: ${_prof:-$PROFILE})"
   log "  thinking     $THINKING  (history: $PRESERVE_THINKING)"
   if (( ${SESSION_BANK_GB:-0} > 0 )); then
     log "  session bank ${SESSION_BANK_GB} GB   (prefix cache for repeat turns)"
   fi
-  log "  neural accel on (M5; MLX selects NAX kernels automatically)"
+  # This line used to read "on (M5; MLX selects NAX kernels automatically)" on
+  # every machine, including M1-M4 where there are no Neural Accelerators at
+  # all. MLX does pick its kernels itself, but off an M5 it is picking the
+  # ordinary Metal ones - so say what the chip is rather than asserting M5.
+  log "  neural accel $(neural_accelerator_state)"
 }
 
 engine_apply_settings() {
   case "$PROFILE" in
+    auto) ;;
     turbo|sustained|stable|exact|performance-cold|max-diagnostic) ;;
-    *) die "PROFILE=\"$PROFILE\" is not a valid MTPLX profile." ;;
+    *) die "PROFILE=\"$PROFILE\" is not one of auto | turbo | sustained | stable | exact | performance-cold | max-diagnostic" ;;
   esac
   case "$BATCHING_PRESET" in
     solo|latency|agent|throughput) ;;

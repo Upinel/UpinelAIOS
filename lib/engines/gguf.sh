@@ -118,6 +118,12 @@ engine_post_fetch_notes() {
   fi
 }
 
+# llama.cpp has no profile concept - its equivalent knobs are explicit flags
+# (flash attention, KV quant, speculative depth), all visible in the command
+# line. Empty here, so the dashboard shows nothing rather than inventing a
+# preset name for an engine that has none.
+engine_resolved_profile() { :; }
+
 # ── command line ─────────────────────────────────────────────────────────────
 # Builds ARGS[] from the unified config. Declares ARGS global on purpose: the
 # caller echoes it for --print and passes it to the binary.
@@ -240,13 +246,13 @@ engine_banner() {
 gguf_tensor_state() {
   if chip_has_neural_accelerator; then
     case "${METAL_TENSOR_API:-auto}" in
-      off) echo "off (forced)" ;;
-      *)   echo "on (M5 Neural Accelerators, ~1.9x prefill)" ;;
+      off) echo "off (forced off; ~2x prefill left on the table)" ;;
+      *)   echo "on ($(chip_family) Neural Accelerators, ~2x prefill)" ;;
     esac
   elif [[ "${METAL_TENSOR_API:-auto}" == "on" ]]; then
-    echo "on (forced on a chip without them)"
+    echo "on (forced on a chip without them - expect no gain, possibly slower)"
   else
-    echo "off (no Neural Accelerators on this chip)"
+    echo "off (none before M5; standard Metal kernels)"
   fi
 }
 

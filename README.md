@@ -110,6 +110,7 @@ Clone it, run `./install.sh`, run `./start.sh`. Nothing else.
 - [Running it day to day](#running-it-day-to-day)
   - [Updating the code](#updating-the-code)
   - [Watching it work](#watching-it-work)
+- [Documentation](#documentation)
 - [Credits and licences](#credits-and-licences)
 
 ## Requirements
@@ -666,6 +667,20 @@ optional in the schema. How to tell them apart:
 | valid JSON, field absent | `tool_calls` | model omitted it | name it in the prompt |
 
 See [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
+
+---
+
+## Documentation
+
+| doc | what is in it |
+|---|---|
+| [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | every failure mode, both engines — Metal OOM on a long prompt, swap storms, truncated tool calls, "it cannot write files" |
+| [docs/GGUF-RUNTIME.md](docs/GGUF-RUNTIME.md) | llama.cpp specifics: the FastMTP draft head, why some models need a patched runtime, Q4_0 vs K-quants |
+| [docs/MLX-TUNING.md](docs/MLX-TUNING.md) | MTPLX specifics: profiles, batching presets, session bank, MTP depth, thinking effort |
+| [docs/CLIENTS.md](docs/CLIENTS.md) | pointing Cursor, Aider, Continue and friends at the endpoint |
+| [docs/RESEARCH-MLX-STACK.md](docs/RESEARCH-MLX-STACK.md) | the MTPLX/MLX measurements this project's MLX defaults come from |
+| [docs/RESEARCH-LLAMACPP-MTP.md](docs/RESEARCH-LLAMACPP-MTP.md) | the llama.cpp MTP work, and why the patched runtime exists |
+| [docs/RESEARCH.md](docs/RESEARCH.md) | the original survey that started this |
 
 ---
 

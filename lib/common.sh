@@ -297,7 +297,7 @@ load_config() {
   METAL_TENSOR_API="auto"
   # MLX-only keys. Defaulted here so a trimmed env.conf still works on either
   # engine; the GGUF engine simply never reads them.
-  PROFILE="sustained"
+  PROFILE="auto"
   BATCHING_PRESET="agent"
   SESSION_BANK_GB=8
   MLX_CACHE_LIMIT_GB=0
@@ -360,11 +360,45 @@ require_macos() {
 # name for a reason: its own notes record the tensor API as ~5% SLOWER on
 # M2 Ultra and neutral on M4/M4 Max. Forcing it on older silicon is a
 # pessimisation, not an optimisation.
+# ── which chip is this ───────────────────────────────────────────────────────
+# One place that answers it. HW_CHIP comes from the installer's scan; the
+# sysctl fallback covers ./start.sh, which does not scan. Asking sysctl here
+# unconditionally - as this used to - meant the same question got two answers
+# depending on which script asked, and neither could be stubbed in a test.
+detected_chip() {
+  if [[ -n "${HW_CHIP:-}" ]]; then printf '%s\n' "$HW_CHIP"; return 0; fi
+  sysctl -n machdep.cpu.brand_string 2>/dev/null || echo "Apple Silicon"
+}
+
+# "M1", "M4", "M5" - the family alone, or empty when it cannot be told.
+chip_family() {
+  detected_chip | awk '{ for (i = 1; i <= NF; i++) if ($i ~ /^M[0-9]+$/) { print $i; exit } }'
+}
+
+# M5 and later have Neural Accelerators in the GPU, and both runtimes have
+# kernels that target them: llama.cpp's Metal tensor API, and MLX's `*_nax`
+# kernels. Below M5 those units do not exist, and llama.cpp measures its
+# tensor API as ~5% SLOWER on M2 Ultra and neutral on M4 - which is why this
+# is a gate and not a preference.
+#
+# Compared numerically rather than against a list, so an M6 or M7 falls in
+# rather than being silently treated as too old.
 chip_has_neural_accelerator() {
-  case "$(sysctl -n machdep.cpu.brand_string 2>/dev/null)" in
-    *" M5"*|*" M6"*|*" M7"*|*" M8"*|*" M9"*) return 0 ;;
-  esac
-  return 1
+  local fam n
+  fam="$(chip_family)"
+  n="${fam#M}"
+  [[ "$n" =~ ^[0-9]+$ ]] || return 1
+  (( n >= 5 ))
+}
+
+# One line describing the accelerator state, shared so GGUF and MLX report it
+# the same way. They differ in who does the selecting, not in whether it is on.
+neural_accelerator_state() {
+  if chip_has_neural_accelerator; then
+    printf 'on (%s Neural Accelerators)\n' "$(chip_family)"
+  else
+    printf 'off (none before M5; standard Metal kernels)\n'
+  fi
 }
 
 # Version of the llama.cpp runtime, or empty when it is not installed.
@@ -1287,7 +1321,7 @@ write_dashboard_payload() {
   AIOS_SLOTS="${PARALLEL_SLOTS:-1}" \
   AIOS_CONTEXT="$CONTEXT_WINDOW" \
   AIOS_KV="$(kv_quant_for "$eng")" \
-  AIOS_PROFILE="${PROFILE:-}" \
+  AIOS_PROFILE="$(engine_resolved_profile "$dir" 2>/dev/null || echo "${PROFILE:-}")" \
   AIOS_THINKING="${THINKING:-}" \
   AIOS_PRESERVE="${PRESERVE_THINKING:-}" \
   AIOS_DEPTH="$(effective_depth 2>/dev/null || echo 3)" \

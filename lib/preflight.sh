@@ -62,9 +62,10 @@ scan_hardware() {
 }
 
 print_hardware() {
-  local chip_family
-  # "Apple M5 Pro" -> "M5"
-  chip_family="$(printf '%s' "$HW_CHIP" | awk '{print $2}')"
+  # chip_family() is the shared answer to "what is this machine"; asking it in
+  # one more place is how the two answers drift apart.
+  local fam
+  fam="$(chip_family)"
 
   log ""
   printf '  %-16s %s\n' "chip"        "$HW_CHIP  (${HW_GPU_CORES} GPU cores, ${HW_CPU_CORES} CPU cores)"
@@ -73,13 +74,17 @@ print_hardware() {
   printf '  %-16s %s\n' "free disk"   "${HW_FREE_GB} GB"
   printf '  %-16s %s\n' "llama.cpp"   "$HW_LLAMA"
   printf '  %-16s %s\n' "model on disk" "$HW_MODEL_PRESENT$([[ "$HW_MODEL_PRESENT" == yes ]] && echo " (${HW_WEIGHTS_GB} GB measured)")"
+  printf '  %-16s %s\n' "neural accel" "$(neural_accelerator_state)"
 
   # The single most useful hardware signal for this workload is memory
   # bandwidth class, which tracks the chip generation more than core count.
-  case "$chip_family" in
-    M1|M2) log "  $C_DIM note: $chip_family-generation memory bandwidth is roughly half an M5's,$C_RESET"
-           log "  $C_DIM expect decode around half the numbers in the README.$C_RESET" ;;
-    M3|M4) log "  $C_DIM note: $chip_family is close to the reference M5 Pro for decode rate.$C_RESET" ;;
+  # The accelerator line above already says whether the M5+ kernels apply.
+  case "$fam" in
+    M1|M2) log "  $C_DIM note: $fam-generation memory bandwidth is roughly half an M5's,$C_RESET"
+           log "  $C_DIM so expect decode around half the numbers in the README.${C_RESET}" ;;
+    M3|M4) log "  $C_DIM note: $fam is close to the reference M5 Pro for decode rate, but has${C_RESET}"
+           log "  $C_DIM no Neural Accelerators - prefill is the part you will notice.${C_RESET}" ;;
+    M5)    log "  $C_DIM note: $fam is the reference this project is tuned against.${C_RESET}" ;;
     *)     ;;
   esac
 }
@@ -88,9 +93,11 @@ print_hardware() {
 # Sets REC_* variables. The rules encode what was actually measured:
 #   * decode needs the weights resident, so MEMORY_LIMIT_GB must clear
 #     weights + KV + ~6 GB of activations
-#   * KV costs 64/34/18 KB per token for f16/q8/q4 (only 16 of 64 layers cache)
-#   * the KV cache is the second allocator after the weights, and on the Qwen
-#     models - which cache KV on every layer - it can outgrow the weights
+#   * KV costs differ per model, not per size: 20-64 KB/token at f16, because
+#     none of these models cache KV on every layer. Gemma 4 caches on 5 of 30
+#     blocks, Qwen 3.x on every 4th. See kv_kb_per_token_f16_gguf().
+#   * the KV cache is the second allocator after the weights, and at long
+#     context it can rival them - on a dense 27B it is several GB by 128k
 # ── per-engine recommendation ────────────────────────────────────────────────
 # UpinelAIOS serves two engines, and the honest thing is to suggest a model for
 # EACH rather than pick one on the user's behalf: they are not the same offer.

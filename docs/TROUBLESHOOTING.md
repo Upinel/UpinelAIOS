@@ -141,6 +141,63 @@ How to tell the two apart:
 `./bench/verify-tools.sh` reports both: check 3 measures the budget a file write
 needs, and check 4b runs five trials against an advisory required field.
 
+## "internal server error" on a long prompt   (MLX)
+
+Symptom: a request with a very large prompt returns HTTP 500 after several
+minutes with
+
+```json
+{"error":{"message":"internal server error; see the MTPLX server log","type":"server_error"}}
+```
+
+Find the request id in the response and grep the log for it. If you see:
+
+```
+[METAL] Command buffer execution failed: Insufficient Memory
+(00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory).
+```
+
+this is a **Metal command-buffer allocation failure, not a system RAM
+shortage.** macOS caps how much a single Metal command buffer may allocate, and
+a very long prefill can exceed it. Freeing system memory will not help; the
+allocator ceiling is the constraint.
+
+Levers, in order:
+
+1. **Lower `PREFILL_CHUNK_TOKENS`** (try `1024`) so prefill runs in smaller
+   Metal allocations instead of one large one. This is the direct fix. The
+   setting is translated per engine - llama.cpp gets 512, MLX 2048 - and
+   `auto` uses those.
+2. **Raise `MEMORY_LIMIT_GB`.** Counterintuitive, but if MLX's own ceiling sits
+   below what the prefilled batch needs, raising it gives Metal room. Do not
+   push it past ~85% of physical RAM.
+3. **Raise the macOS wired ceiling** with `WIRED_LIMIT_GB` - and read the
+   warning in `env.conf` first. A hard-killed process can leak wired pages
+   until reboot.
+
+Observed on the reference machine (M5 Pro, 64 GB, desktop session running):
+prompts up to ~93k tokens prefill successfully, a single ~131k-token prefill
+fails with this error. **Incremental context growth works** - an agent that
+builds a 128k conversation turn by turn is reusing cached prefixes, not
+prefilling 131k in one go.
+
+## Swap storm, or the machine becomes unresponsive   (MLX)
+
+`vm_stat` shows `Pages wired down` approaching physical RAM and swap fills.
+MTPLX's session bank is usually the cause: it auto-sizes to *half the
+post-model RAM surplus* (16.6 GB on a 64 GB Mac with a 48 GB cap).
+
+```conf
+SESSION_BANK_GB=8      # was auto; 8 is a good balance
+MLX_CACHE_LIMIT_GB=4   # tighten further if still swapping
+MEMORY_LIMIT_GB=44     # or lower the overall ceiling
+```
+
+Restart with `./restart.sh`. **Always stop gracefully** - `SIGTERM`, not
+`kill -9`. A process holding a large wired MLX allocation that is hard-killed
+may leak those pages at the kernel level until the machine reboots.
+`./stop.sh --force` exists, but it is a last resort.
+
 ## Everything is slower than the README numbers
 
 Check, in order:
@@ -188,6 +245,55 @@ This is a known pathology of reasoning models on repetitive input.
 ```conf
 THINKING="off"
 ```
+
+## "The model cannot create or write files"   (both engines)
+
+**Start here:** run the diagnostic.
+
+```bash
+./bench/verify-tools.sh
+```
+
+It checks everything an agent needs - non-streaming tool calls, streaming
+tool-call deltas with indexes, argument JSON assembly, the multi-turn tool
+result round-trip, and the Anthropic `/v1/messages` `tool_use` shape. If it
+passes, the endpoint is fine and the problem is on the client side.
+
+**Understand what the model can and cannot do.** A language model has no
+filesystem. It cannot write a file; it can only *ask* the client to write one
+by emitting a tool call. Something else - your agent harness - has to receive
+that call and perform it. If you ask the model directly in a chat box to
+"create a file", the correct behaviour is for it to describe the file, not to
+create it. That is not a bug.
+
+So when file writing does not work, the failure is almost always one of these:
+
+| Check | How to confirm |
+|---|---|
+| The agent was never given a write tool | Look at the tools list in the agent's request. No `write_file`-style tool means nothing to call. |
+| The agent is pointed at the wrong endpoint | It should be the base URL from `./status.sh`, ending in `/v1`, with the API key. |
+| The agent only supports hosted providers | Some tools ignore tool calls from a local OpenAI-compatible endpoint. Check its provider docs. |
+| The reply is being truncated | If the tool call is cut off, arguments arrive as invalid JSON. See below. |
+| A middle layer strips tool calls | Proxies, gateways, and "OpenAI-compatible" shims sometimes drop `tool_calls`. |
+
+### The truncation trap, which is the one that bites
+
+Tool calls are emitted as tokens like any other output, and they are emitted
+**after** any thinking block. With `THINKING="low"` a model can spend several
+hundred tokens reasoning before it starts writing the call, and if the client's
+`max_tokens` is small the call is cut off mid-JSON. The client then sees an
+unparseable tool call and reports that the model "failed".
+
+```conf
+THINKING="off"
+```
+
+is the fix, and it is the right setting for a tool-calling loop anyway: it is
+faster, and it removes the truncation risk. If you want to keep thinking on,
+give the agent a generous `max_tokens` (2048+) instead.
+
+The diagnostic prints this hint automatically when it sees a malformed
+`arguments` string or a `finish_reason` other than `tool_calls`.
 
 ## Reporting a problem upstream
 
