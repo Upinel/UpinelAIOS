@@ -756,6 +756,18 @@ python3 bench/thinking-budget-test.py                   # tune the thinking budg
 python3 bench/verify-quant-select.py                    # offline, no server needed
 ```
 
+Everything checkable without a server, in one command:
+
+```bash
+./bench/verify-all.sh
+```
+
+That runs the offline regression suites — alias resolution, the model
+suggestion rule at each memory size, the on-disk picker, quant selection and
+draft selection — plus a syntax check on every shell file. No model, no server,
+no network. `bench/verify-tools.py` is deliberately not included: it is a
+diagnostic against a live endpoint, and belongs to `./bench/verify-tools.sh`.
+
 `agent-bench.py` measures time-to-first-token, prefill and decode at real
 context lengths, and reports **KV reuse** — a multi-turn agent re-sends a
 growing prefix every turn, and if the server reuses it those turns cost almost

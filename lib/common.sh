@@ -197,6 +197,14 @@ model_repo_for() {
     set -- "$_a"
   fi
 
+  # Dropped rather than renamed. These get their own message because whoever
+  # hits one is migrating, not mistyping: the generic "not a known alias" would
+  # send them hunting for a spelling mistake that is not there.
+  case "$1" in
+    26b-a4b)
+      die "MODEL alias \"26b-a4b\" was removed. Use \"gguf-g-26ba4b\" - same model, but the Q4_0 QAT build decodes 47% faster (106.4 vs 72.5 t/s) and is 3 GB smaller." ;;
+  esac
+
   case "$1" in
     gguf-g-26ba4b)      echo "OS-Software/gemma-4-26B-A4B-it-qat-q4_0-heretic-ja-GGUF" ;;
     # gguf-g-26ba4b-q4km used to live here: the same Gemma 4 26B-A4B MoE in
