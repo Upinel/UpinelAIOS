@@ -150,24 +150,44 @@ Clone it, run `./install.sh`, run `./start.sh`. Nothing else.
 
 | | |
 |---|---|
-| **Minimum** | Apple Silicon Mac, **8 GB** unified memory, macOS 14+ |
-| **Comfortable** | **16 GB** — any Mac, including an M1 MacBook Air |
+| **Minimum** | Apple Silicon Mac, **16 GB** unified memory, macOS 14+ |
+| **Comfortable** | **32 GB** — the default model fits with room for a desktop |
 | **Recommended** | **64 GB**, for 128K context on the 26B and room for a full desktop |
 
-8 GB is genuinely enough, but only with the smallest model. The memory each
-option actually needs, measured as resident set size:
+**16 GB is the floor this project is tuned for.** On a 16 GB Mac `gguf-g-e2b` is
+comfortable and `gguf-g-12b` is the largest model that fits; the default
+`gguf-g-26ba4b` does not, because it wants ~19 GB once its context is counted.
 
-| model | file | RAM used | fits |
+> ### ⚠️ 8 GB — supported, but use with caution
+>
+> **An 8 GB Mac still works, and you are welcome to run it.** It just is not
+> what this is tuned for, and it is tight: the smallest model fits and nothing
+> else, the context has to come down far enough that the model loses the start
+> of a long conversation, and macOS is competing for the same memory the whole
+> time.
+>
+> Expect paging, a slow first token, and less headroom than every other number
+> in this README assumes. Set it up like this and it does work:
+
+```conf
+MODEL="gguf-g-e2b"
+CONTEXT_WINDOW=8192
+MEMORY_LIMIT_GB=6
+```
+
+macOS itself wants 3–4 GB, so leave it that room — that is what makes the
+difference between slow and unusable. Everything above stands, but treat it as
+a ceiling rather than a starting point.
+
+The memory each option actually needs, measured as resident set size:
+
+| model | file | RAM used | needs |
 |---|---:|---:|---|
-| `gguf-g-e2b` | 3.4 GB | **4.2 GB** | 8 GB Mac |
-| `gguf-g-e4b` | 5.3 GB | 6.8 GB | 16 GB Mac |
-| `gguf-g-12b` | 7.4 GB | ~10 GB | 16 GB Mac |
-| `gguf-g-31b` | 17.8 GB | ~22 GB | 32 GB Mac |
-
-On an 8 GB Mac set `MODEL="gguf-g-e2b"`, `CONTEXT_WINDOW=8192` and
-`MEMORY_LIMIT_GB=6`. macOS itself wants 3–4 GB, so leave it that room. On a
-16 GB Mac, `gguf-g-e2b` is comfortable, `gguf-g-12b` is the largest model that fits, and the
-default `gguf-g-26ba4b` does not — it wants ~19 GB with its context.
+| `gguf-g-e2b` | 3.4 GB | **4.2 GB** | 8 GB, tightly |
+| `gguf-g-e4b` | 5.3 GB | 6.8 GB | 16 GB |
+| `gguf-g-12b` | 7.4 GB | ~10 GB | 16 GB |
+| `gguf-g-26ba4b` *(default)* | 14.3 GB | ~19 GB | 32 GB |
+| `gguf-g-31b` | 17.8 GB | ~22 GB | 32 GB |
 
 Disk: 4–20 GB per model, depending which you pick.
 
@@ -289,13 +309,14 @@ engine this Mac can actually load — and lets you choose:
 Pick 3 and you get both runtimes and both models; each is served by whatever
 `./start.sh` or the `./model_download.sh` picker selects afterwards.
 
-An engine is only offered if something in it fits. On an 8 GB Mac the menu
-collapses to the single model that runs, and the other engine is explained
-rather than listed:
+An engine is only offered if something in it fits. On an 8 GB Mac - below the
+recommended floor, but the clearest case - the menu collapses to the single
+model that runs, and the other engine is explained rather than listed:
 
 ```
-  1  GGUF  gguf-g-e2b              4 GB   smallest, and the fastest small model
-  2  your  your own Hugging Face repo            any uncensored owner/name
+  1  GGUF  gguf-g-e2b              4 GB   smallest, and the fastest small model: fits an 8 GB Mac
+  2  list  pick any model we ship            with a verdict for this Mac
+  3  yours type a Hugging Face repo id            any uncensored owner/name
 
   No MLX model is offered: the smallest one, mlx-q-9b,
   needs about 9 GB and this Mac has 8 GB.
@@ -476,7 +497,7 @@ something that will not fit is allowed; it warns, then does what you asked.
 | alias | download | repo |
 |---|---:|---|
 | **`gguf-g-26ba4b`** | 15 GB | `OS-Software/gemma-4-26B-A4B-it-qat-q4_0-heretic-ja-GGUF` — **default**, Q4_0 QAT, 106 t/s at short context (89 at 8k) |
-| `gguf-g-e2b` | 4 GB | `HauhauCS/Gemma-4-E2B-Uncensored-HauhauCS-Aggressive` — 99.9 t/s. Smallest, fits 8 GB. |
+| `gguf-g-e2b` | 4 GB | `HauhauCS/Gemma-4-E2B-Uncensored-HauhauCS-Aggressive` — 99.9 t/s. Smallest; the only one that runs on an 8 GB Mac, and tightly at that. |
 | `gguf-g-e4b` | 6 GB | `HauhauCS/Gemma-4-E4B-Uncensored-HauhauCS-Aggressive` — 63.9 t/s. Only if `gguf-g-26ba4b` will not fit. |
 | `gguf-g-12b` | 8 GB | `HauhauCS/Gemma4-12B-QAT-Uncensored-HauhauCS-Balanced` — 54.5 t/s. Largest that fits a 16 GB Mac. |
 | `gguf-g-31b` | 20 GB | `llmfan46/gemma-4-31B-it-uncensored-heretic-GGUF` — highest quality dense model |
@@ -870,8 +891,9 @@ has roughly a quarter of an M5 Pro's bandwidth. Order-of-magnitude:
 | `gguf-g-e2b` | ~25 t/s |
 | `gguf-g-e4b` | ~15 t/s |
 
-Even the pessimistic end is a usable agent endpoint, and `gguf-g-e2b` at 4.2 GB is the
-right pick for an 8 GB Air.
+Even the pessimistic end is a usable agent endpoint, and `gguf-g-e2b` at 4.2 GB
+is the right pick for a 16 GB Air. On an 8 GB one it is still the right pick —
+it is simply tight, and worth reading [Requirements](#requirements) first.
 
 #### M5 Neural Accelerators: nearly 2× the prefill, free
 
