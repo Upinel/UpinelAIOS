@@ -50,6 +50,7 @@ import os
 import pty
 import re
 import select
+import shutil
 import signal
 import subprocess
 import sys
@@ -218,6 +219,63 @@ def main():
         check("no command not found", "command not found" in out2, False)
         check("the engine follows the pick, not env.conf",
               "Engine: MLX" in out2, True)
+
+    print("\n  picker timeout\n")
+    # PICK_TIMEOUT_SECONDS. Worth testing because a bad value here is silent:
+    # bash 3.2 rejects `read -t` with a non-integer by printing "invalid
+    # timeout specification" and the picker takes the default instantly without
+    # ever saying why - which looks like the menu being ignored.
+    env_file = os.path.join(REPO, "env.conf")
+    backup = env_file + ".ticktest"
+    shutil.copyfile(env_file, backup)
+
+    def resolve_with(edit):
+        """Load config against env.conf transformed by edit(), and report."""
+        src = open(backup, encoding="utf-8").read()
+        with open(env_file, "w", encoding="utf-8") as fh:
+            fh.write(edit(src))
+        r = subprocess.run(
+            ["bash", "-c",
+             f'source {REPO}/lib/common.sh; load_config; '
+             'printf "%s" "$PICK_TIMEOUT_SECONDS"'],
+            capture_output=True, text=True, timeout=60)
+        return r.stdout.strip(), r.stderr.strip()
+
+    def set_value(v):
+        return lambda src: re.sub(r"^PICK_TIMEOUT_SECONDS=.*$",
+                                  f"PICK_TIMEOUT_SECONDS={v}", src, count=1, flags=re.M)
+
+    def drop_key(src):
+        # An env.conf written before this setting existed. Reverting the code
+        # default to 5 only shows up here - with the key present, env.conf wins
+        # and the code default is never consulted.
+        return re.sub(r"^PICK_TIMEOUT_SECONDS=.*\n", "", src, count=1, flags=re.M)
+
+    def legacy(src):
+        src = re.sub(r"^PICK_TIMEOUT_SECONDS=.*$",
+                     "MODEL_PICK_SECONDS=15", src, count=1, flags=re.M)
+        return src
+
+    try:
+        got, _ = resolve_with(set_value(45))
+        check("env.conf can set its own timeout", got, "45")
+
+        got, _ = resolve_with(drop_key)
+        check("an env.conf without the key gets the 30s default", got, "30")
+
+        got, _ = resolve_with(legacy)
+        check("the old MODEL_PICK_SECONDS name still works", got, "15")
+
+        got, err = resolve_with(set_value("abc"))
+        check("a non-numeric timeout falls back to 30", got, "30")
+        check("and says so rather than silently ignoring the menu",
+              "not a positive whole number" in err, True)
+
+        got, _ = resolve_with(set_value(0))
+        check("zero is rejected too", got, "30")
+    finally:
+        shutil.copyfile(backup, env_file)
+        os.unlink(backup)
 
     print("\n  picker rendering\n")
     check("long repo names are truncated, not overrunning the column",

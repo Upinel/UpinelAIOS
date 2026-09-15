@@ -322,9 +322,28 @@ load_config() {
   WIRED_LIMIT_GB=0
   WARMUP_TOKENS=8
   LOG_FILE="$REPO_DIR/run/server.log"
+  # How long the interactive pickers wait before taking the default. Thirty
+  # seconds, not five: five is not enough to read a menu of eleven models, let
+  # alone decide, and a wrong pick costs a minute of reloading.
+  PICK_TIMEOUT_SECONDS=30
 
   # shellcheck disable=SC1090
   source "$ENV_FILE"
+
+  # The older name, honoured only when the new one is absent. Checked here and
+  # not before the source above, which is where it was first written: a value
+  # env.conf sets cannot be read before env.conf is read.
+  if ! grep -qE '^[[:space:]]*PICK_TIMEOUT_SECONDS=' "$ENV_FILE" 2>/dev/null; then
+    [[ -n "${MODEL_PICK_SECONDS:-}" ]] && PICK_TIMEOUT_SECONDS="$MODEL_PICK_SECONDS"
+  fi
+
+  # A bad value here does not fail loudly - bash 3.2 rejects `read -t` with a
+  # non-integer by printing "invalid timeout specification", so the picker
+  # would take the default instantly and never say why. Checked instead.
+  if [[ ! "${PICK_TIMEOUT_SECONDS}" =~ ^[0-9]+$ ]] || (( PICK_TIMEOUT_SECONDS < 1 )); then
+    warn "PICK_TIMEOUT_SECONDS=\"$PICK_TIMEOUT_SECONDS\" is not a positive whole number; using 30."
+    PICK_TIMEOUT_SECONDS=30
+  fi
 
   MODEL_REPO="$(model_repo_for "$MODEL")"
   MODEL_DIR="$MODELS_DIR/${MODEL_REPO//\//--}"
@@ -336,6 +355,7 @@ load_config() {
   export SERVED_MODEL_NAME FAN_MODE LOG_FILE ENABLE_VISION PARALLEL_SLOTS
   export MEMORY_LIMIT_GB WIRED_LIMIT_GB USE_MLOCK MAX_CONCURRENT
   export PREFILL_CHUNK_TOKENS BATCH_SIZE UBATCH_SIZE
+  export PICK_TIMEOUT_SECONDS
 }
 
 # ── machine facts ────────────────────────────────────────────────────────────
@@ -484,12 +504,12 @@ choose_expert_profile() {
   print_profile_menu
   printf '  Number [1-%d], or Enter for %s. Auto-selects in %ds: ' \
          "$(( $(printf '%s\n' $EXPERT_PROFILES | wc -l | tr -d ' ') + 1 ))" \
-         "$(expert_profile_label "$cur")" "$MODEL_PICK_SECONDS"
+         "$(expert_profile_label "$cur")" "$PICK_TIMEOUT_SECONDS"
 
   ans=""
-  if ! read -r -t "$MODEL_PICK_SECONDS" ans; then
+  if ! read -r -t "$PICK_TIMEOUT_SECONDS" ans; then
     log ""
-    info "No answer in ${MODEL_PICK_SECONDS}s - keeping $(expert_profile_label "$cur")."
+    info "No answer in ${PICK_TIMEOUT_SECONDS}s - keeping $(expert_profile_label "$cur")."
     return 1
   fi
 
@@ -682,17 +702,12 @@ alias_for_repo() {
   printf '\n'
 }
 
-# How long the on-disk picker waits before taking the default. Whole seconds
-# only: bash 3.2 - which is what ships on macOS - rejects `read -t 0.5` with
-# "invalid timeout specification".
-MODEL_PICK_SECONDS=5
-
 # Offer the models already downloaded, when there is a real choice to make.
 #
 # Sets MODEL_REPO and MODEL_DIR when something is chosen and returns 0; returns
 # 1 to mean "keep what env.conf says", which covers every case where asking
 # would be wrong: one model on disk, no terminal to ask on, an unreadable
-# answer, or no answer within MODEL_PICK_SECONDS.
+# answer, or no answer within PICK_TIMEOUT_SECONDS.
 #
 # Never prompts without a terminal. A server start must not hang behind a
 # question in a pipe, in CI, or under launchd.
@@ -750,12 +765,12 @@ choose_model_on_disk() {
   done
   log ""
   printf '  Number [1-%d], or Enter for the default. Auto-selects in %ds: ' \
-         "${#dirs[@]}" "$MODEL_PICK_SECONDS"
+         "${#dirs[@]}" "$PICK_TIMEOUT_SECONDS"
 
   local ans=""
-  if ! read -r -t "$MODEL_PICK_SECONDS" ans; then
+  if ! read -r -t "$PICK_TIMEOUT_SECONDS" ans; then
     log ""
-    info "No answer in ${MODEL_PICK_SECONDS}s - using $(basename "$default_dir")."
+    info "No answer in ${PICK_TIMEOUT_SECONDS}s - using $(basename "$default_dir")."
     return 1
   fi
 

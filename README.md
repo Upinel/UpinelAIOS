@@ -193,16 +193,22 @@ within five seconds the default from `env.conf` is used, so nothing ever waits
 on you:
 
 ```
-  Models on disk   5 downloaded - pick one to serve now
+  Models on disk   11 downloaded - pick one to serve now
 
-   1  e2b            3 GB
-   2  26b-a4b       16 GB
-   3  qwen-27b      17 GB
-   4  26b-q4        14 GB  <- default
-   5  qwen-9b        5 GB
+   #  ENGINE ALIAS                  SIZE
+   1  MLX   mlx-q-9b                5 GB
+   2  GGUF  gguf-g-e2b              3 GB
+   ...
+   8  GGUF  gguf-g-26ba4b          14 GB  <- default
+   9  MLX   mlx-q-35ba3b           22 GB
+  10  MLX   mlx-q-27b-4bit         15 GB
+  11  GGUF  gguf-q-9b               5 GB
 
-  Number [1-5], or Enter for the default. Auto-selects in 5s:
+  Number [1-11], or Enter for the default. Auto-selects in 30s:
 ```
+
+The 30-second wait is `PICK_TIMEOUT_SECONDS` in `env.conf`; press Enter to take
+the default immediately.
 
 It is a one-run choice and is not written back — `MODEL` in `env.conf` is still
 the default. Pass `--model gguf-g-12b` to skip the question entirely, and note that it
