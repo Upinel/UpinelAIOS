@@ -11,12 +11,17 @@
 #  "Make it work, make it right, make it fast - then measure it, because
 #   the third one is only a claim until the numbers agree."
 # ─────────────────────────────────────────────────────────────────────────────
-# Start the UpinelAIOS-GGUF endpoint.
+# Start the UpinelAIOS endpoint - GGUF or MLX, whichever the model needs.
 #
 #   ./start.sh                 start in the background (default)
 #   ./start.sh --foreground    run attached to this terminal (Ctrl-C to stop)
 #   ./start.sh --print         print the command it would run, then exit
-#   ./start.sh --model 12b     serve a different model for this run only
+#   ./start.sh --model moe     serve a different model for this run only
+#
+# The engine is not a setting. A model belongs to exactly one runtime - a GGUF
+# checkpoint can only run on llama.cpp, an MTPLX pack can only run on MTPLX - so
+# choosing the model chooses the engine, and this script loads the matching
+# module from lib/engines/ and hands over.
 #
 # All settings come from env.conf. Apply edits with ./restart.sh.
 
@@ -35,52 +40,19 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 
-step "UpinelAIOS-GGUF"
+step "UpinelAIOS"
 
 # ── preflight ────────────────────────────────────────────────────────────────
-is_apple_silicon || die "UpinelAIOS-GGUF needs an Apple Silicon Mac."
-require_bin llama-server "Run ./install.sh first, or: brew install llama.cpp"
-# LLAMA_SERVER may point at a patched build. It is only used for models whose
-# draft head actually requires the patch - see the selection below - so setting
-# it does not slow down anything else.
+is_apple_silicon || die "UpinelAIOS needs an Apple Silicon Mac."
 require_bin python3 "python3 is required."
 
 if [[ -n "$MODEL_OVERRIDE" ]]; then
   MODEL_REPO="$(model_repo_for "$MODEL_OVERRIDE")"
-  MODEL_DIR="$MODELS_DIR/${MODEL_REPO//\//--}"
-  export MODEL_REPO MODEL_DIR
+  MODEL_ALIAS="$MODEL_OVERRIDE"
   info "Model override for this run: $MODEL_REPO"
+else
+  MODEL_ALIAS="$(alias_for_repo "$MODEL_REPO")"
 fi
-
-# Validate the enums up front, so a typo fails before loading 17 GB of weights.
-case "$KV_QUANT" in q8_0|q4_0|f16|bf16) ;; *) die "KV_QUANT=\"$KV_QUANT\" is not one of q8_0 | q4_0 | f16 | bf16" ;; esac
-thinking_level_ok "$THINKING" || die "THINKING=\"$THINKING\" is not one of off | minimal | low | high"
-case "$FAN_MODE" in default|smart|max) ;; *) die "FAN_MODE=\"$FAN_MODE\" is not one of default | smart | max" ;; esac
-
-# M5 neural accelerators, via llama.cpp's Metal 4 tensor API. llama.cpp reads
-# these at device init, so they must be in the environment of the server
-# process - hence export here rather than anywhere later.
-#
-# Measured on this M5 Pro, 8k prompt, cold: 1,374 t/s prefill with the tensor
-# API against 715 t/s without, and decode unchanged. It is a prefill win, and
-# prefill is what a cold agent turn waits on.
-case "${METAL_TENSOR_API:-auto}" in
-  auto) ;;
-  on)
-    if ! chip_has_neural_accelerator; then
-      warn "METAL_TENSOR_API=on, but this chip has no Neural Accelerators (M5 or later only)."
-      warn "llama.cpp measures the tensor API as ~5% SLOWER on M2 Ultra and neutral on M4."
-      warn "Leaving it on because you asked explicitly."
-    fi
-    export GGML_METAL_TENSOR_ENABLE=1
-    ;;
-  off)
-    export GGML_METAL_TENSOR_DISABLE=1
-    ;;
-  *)
-    die "METAL_TENSOR_API=\"$METAL_TENSOR_API\" is not one of auto | on | off"
-    ;;
-esac
 
 # ── which downloaded model to serve ──────────────────────────────────────────
 # Offered only when there is a real choice: more than one model on disk, a
@@ -88,90 +60,53 @@ esac
 # so a start in a pipe, in CI or under launchd is never held up by a prompt.
 if [[ -z "$MODEL_OVERRIDE" ]] && (( ! PRINT_ONLY )); then
   if choose_model_on_disk; then
-    export MODEL_REPO MODEL_DIR
     info "Serving $MODEL_REPO for this run. Set MODEL in env.conf to make it permanent."
   fi
 fi
 
-MAIN_GGUF="$(model_main_gguf "$MODEL_DIR" || true)"
-[[ -n "$MAIN_GGUF" ]] || die "No model weights found in $MODEL_DIR
-    Run ./install.sh, or ./model_download.sh $MODEL"
+MODEL_DIR="$MODELS_DIR/${MODEL_REPO//\//--}"
+export MODEL_REPO MODEL_DIR
 
-MMPROJ=""
-if (( ENABLE_VISION )); then
-  MMPROJ="$(model_mmproj_gguf "$MODEL_DIR" || true)"
-  [[ -n "$MMPROJ" ]] || warn "ENABLE_VISION=1 but no mmproj file found; serving text only."
+# ── which engine serves it ───────────────────────────────────────────────────
+ENGINE="$(model_engine_for "${MODEL_ALIAS:-$MODEL_REPO}")"
+if [[ -z "$ENGINE" ]]; then
+  # Not a known alias: decide from what is actually on disk.
+  ENGINE="$(engine_for_dir "$MODEL_DIR")"
 fi
+[[ -n "$ENGINE" ]] || die "Cannot tell which engine serves '$MODEL_REPO'.
+    Known aliases: $MODEL_ALIASES
+    Or point MODEL at a directory under $MODELS_DIR that holds a complete model."
 
-# Default to the stock build on PATH. This is swapped for a patched one only
-# when the selected model's draft head requires it.
-LLAMA_BIN="llama-server"
+ENGINE_MODULE="$REPO_DIR/lib/engines/$ENGINE.sh"
+[[ -f "$ENGINE_MODULE" ]] || die "No engine module for '$ENGINE' at $ENGINE_MODULE"
+# shellcheck source=/dev/null
+source "$ENGINE_MODULE"
 
-DRAFT="$(model_draft_gguf "$MODEL_DIR" || true)"
-DEPTH="$(effective_depth)"
+info "Engine: $(engine_name)"
+engine_present || die "$(engine_name) is not installed. $(engine_install_hint)"
 
-# A trimmed-vocabulary draft head accepts far fewer tokens the deeper you
-# draft: measured 77% at depth 1 against 53% at depth 3, so depth 3 does less
-# work per round and comes out slower (10.6 t/s against 15.4). When the user
-# has left MTP_DEPTH on "auto" and no tuned value exists, use 1 for these
-# heads instead of the default 3. An explicit MTP_DEPTH always wins.
-if [[ "$MTP_DEPTH" == "auto" ]] && [[ -n "$DRAFT" ]] \
-   && [[ -z "$(tuned_depth)" ]] && draft_needs_patched_runtime "$DRAFT"; then
-  DEPTH=1
-  info "trimmed-vocab draft head: using depth 1 (it accepts 77% here against 53% at depth 3)."
-fi
-if (( DEPTH > 0 )) && [[ -z "$DRAFT" ]]; then
-  warn "MTP_DEPTH=$DEPTH but this model has no draft file; running autoregressive."
-  DEPTH=0
-fi
+# Validate the enum settings this engine cares about, before loading weights.
+engine_apply_settings
 
-# A draft built against a patched llama.cpp will not load on a stock one, and
-# llama-server treats that as fatal - the whole server exits rather than
-# falling back. Left alone, "a bit more speed" becomes "will not start".
-# Detect it and run autoregressive unless the user says they built the patch.
-if (( DEPTH > 0 )) && [[ -n "$DRAFT" ]] && draft_needs_patched_runtime "$DRAFT"; then
-  # This head needs the patched runtime. Use it if we have one: either
-  # LLAMA_SERVER points somewhere, or the user says their PATH already has it.
-  # Choosing here rather than up front is the whole point - the patched build
-  # is a couple of percent slower, and Gemma must not pay that.
-  if [[ -n "${LLAMA_SERVER:-}" && -x "${LLAMA_SERVER:-}" ]]; then
-    LLAMA_BIN="$LLAMA_SERVER"
-    info "using the patched runtime for this draft: $LLAMA_SERVER"
-  elif (( ${DRAFT_PATCHED_RUNTIME:-0} )); then
-    LLAMA_BIN="llama-server"
-    info "draft needs a patched llama.cpp; DRAFT_PATCHED_RUNTIME=1 so using it as-is."
-  else
-    warn "$(basename "$DRAFT") needs a patched llama.cpp (trimmed draft vocab)."
-    warn "Running autoregressive to keep the server up."
-    warn "Build llama.cpp with the HauhauCS FastMTP patch and set"
-    warn "DRAFT_PATCHED_RUNTIME=1 in env.conf to use it. See docs/GGUF-RUNTIME.md."
-    DEPTH=0
-    DRAFT=""
-  fi
-fi
+engine_model_ok "$MODEL_DIR" || die "No complete $(engine_name) model at $MODEL_DIR
+    Run ./install.sh, or ./model_download.sh ${MODEL_ALIAS:-$MODEL_REPO}"
 
 # ── memory sanity ────────────────────────────────────────────────────────────
 RAM_GB="$(total_ram_gb)"
-WEIGHTS_GB=$(( $(stat -f%z "$MAIN_GGUF") / 1000000000 ))
-KV_KB="$(kv_kb_per_token_f16 "$MODEL_REPO")"
-case "$KV_QUANT" in
-  q8_0) KV_KB=$(( KV_KB / 2 )) ;;
-  q4_0) KV_KB=$(( KV_KB / 4 )) ;;
-esac
+WEIGHTS_GB="$(model_dir_size_gb "$MODEL_DIR")"
+KV_KB="$(kv_kb_for_engine "$ENGINE")"
 KV_GB=$(( CONTEXT_WINDOW * KV_KB / 1024 / 1024 ))
-VISION_GB=0; [[ -n "$MMPROJ" ]] && VISION_GB=$(( $(stat -f%z "$MMPROJ") / 1000000000 ))
-NEED_GB=$(( WEIGHTS_GB + KV_GB + VISION_GB + 3 ))
+NEED_GB=$(( WEIGHTS_GB + KV_GB + 3 ))
 
-info "Memory plan: ${WEIGHTS_GB} GB weights + ${KV_GB} GB KV (${KV_QUANT}) + ${VISION_GB} GB vision + 3 GB scratch = ${NEED_GB} GB"
 if (( NEED_GB > MEMORY_LIMIT_GB )); then
   warn "Plan needs ~${NEED_GB} GB but MEMORY_LIMIT_GB=${MEMORY_LIMIT_GB}."
-  warn "Lower CONTEXT_WINDOW, use KV_QUANT=q4_0, or raise MEMORY_LIMIT_GB."
+  warn "Lower CONTEXT_WINDOW, use KV_QUANT=q4, or raise MEMORY_LIMIT_GB."
 fi
 if (( NEED_GB > RAM_GB )); then
   die "Plan needs ~${NEED_GB} GB but this Mac has ${RAM_GB} GB. It will not load."
 fi
 
-# ── API key (llama.cpp refuses a non-loopback bind without one) ──────────────
+# ── API key (both runtimes refuse a non-loopback bind without one) ───────────
 NEED_KEY=0
 [[ "$HOST" != "127.0.0.1" && "$HOST" != "localhost" ]] && NEED_KEY=1
 (( NEED_KEY )) && ensure_api_key
@@ -191,71 +126,17 @@ EXISTING="$(port_pids | head -1)"
     Stop it, or change PORT in env.conf."
 
 # ── build the command ────────────────────────────────────────────────────────
-ARGS=(
-  -m "$MAIN_GGUF"
-  -ngl all
-  -fa on
-  -c "$CONTEXT_WINDOW"
-  -b "$BATCH_SIZE"
-  -ub "$UBATCH_SIZE"
-  --parallel "$PARALLEL_SLOTS"
-  -ctk "$KV_QUANT"
-  -ctv "$KV_QUANT"
-  --host "$HOST"
-  --port "$PORT"
-  --alias "$SERVED_MODEL_NAME"
-  --no-webui
-  --metrics
-  --timeout 3600
-)
-
-# Keep the weights resident. Without this macOS can page them out and the
-# decode rate becomes erratic rather than merely slow.
-(( USE_MLOCK )) && ARGS+=( -lm mlock )
-
-[[ -n "$MMPROJ" ]] && ARGS+=( --mmproj "$MMPROJ" )
-(( NEED_KEY )) && ARGS+=( --api-key "$API_KEY" )
-
-if (( DEPTH > 0 )) && [[ -n "$DRAFT" ]]; then
-  ARGS+=( -md "$DRAFT" --spec-type draft-mtp --spec-draft-n-max "$DEPTH" --spec-draft-ngl all )
-fi
-
-# Thinking. Gemma 4's template reads enable_thinking; llama.cpp passes
-# --chat-template-kwargs straight through.
-ARGS+=( --chat-template-kwargs "$(thinking_kwargs)" )
-
-# Cap the thought channel. Without this, "thinking on" is unbounded and the
-# model will happily spend 300 tokens reasoning about where to find a file.
-# The message matters as much as the budget: measured on eight agent tasks,
-# every budgeted setting without it scored 7/8 against thinking-off's 8/8,
-# because a thought cut off mid-sentence never got round to emitting a tool
-# call. With it, every budget scored 8/8. See lib/common.sh for the numbers.
-BUDGET="$(effective_thinking_budget)"
-if [[ -n "$BUDGET" ]]; then
-  ARGS+=( --reasoning-budget "$BUDGET" )
-  if [[ -n "${THINKING_BUDGET_MESSAGE:-}" ]]; then
-    ARGS+=( --reasoning-budget-message "$THINKING_BUDGET_MESSAGE" )
-  fi
-fi
-
+# Everything below this line is engine-specific, and the engine module owns it.
 mkdir -p "$RUN_DIR"
+ARGS=()
+engine_build_args "$MODEL_DIR"
+engine_export_env
 
-# Tool-call reliability. Gemma follows a schema's semantics but not its
-# `required` list, so agent harnesses see "missing required property" on fields
-# the model judged optional. Generating a template that names each tool's
-# required fields fixes it server-side. See lib/tools-template.py.
-if (( TOOL_TEMPLATE )); then
-  if python3 "$REPO_DIR/lib/tools-template.py" --gguf "$MAIN_GGUF" \
-       --out "$RUN_DIR/tools-template.jinja" 2>>"$RUN_DIR/template.err"; then
-    ARGS+=( --chat-template-file "$RUN_DIR/tools-template.jinja" )
-  else
-    log "  note: tool template unavailable, using the model's stock template"
-    log "        (see $RUN_DIR/template.err)"
-  fi
-fi
+ENGINE_BIN="$(engine_binary)"
+SERVE_WORD="$(engine_serve_word 2>/dev/null || echo '')"
 
 if (( PRINT_ONLY )); then
-  log "$LLAMA_BIN \\"
+  log "$ENGINE_BIN ${SERVE_WORD:+$SERVE_WORD }\\"
   printf '  %s \\\n' "${ARGS[@]}"
   exit 0
 fi
@@ -263,30 +144,12 @@ fi
 # ── banner ───────────────────────────────────────────────────────────────────
 LAN="$(lan_ip)"
 log ""
+log "  engine       $(engine_name)"
 log "  model        $MODEL_REPO"
-log "  weights      $(basename "$MAIN_GGUF")  (${WEIGHTS_GB} GB)"
-log "  context      $CONTEXT_WINDOW tokens   (KV: $KV_QUANT, ~${KV_GB} GB)"
-if (( DEPTH > 0 )); then
-  log "  speculative  depth $DEPTH   ($(basename "$DRAFT"))"
-else
-  log "  speculative  off (plain autoregressive)"
-fi
+log "  weights      ${WEIGHTS_GB} GB"
+log "  context      $CONTEXT_WINDOW tokens   (KV: $(kv_quant_for "$ENGINE"), ~${KV_GB} GB)"
+engine_banner
 log "  thinking     $THINKING"
-log "  vision       $([[ -n "$MMPROJ" ]] && echo "on" || echo "off")"
-
-# Say what the tensor API will actually be. "auto" resolves by chip, and the
-# answer differs between an M5 and an M3, so reporting the resolved state beats
-# reporting the setting.
-TENSOR_STATE="off (no Neural Accelerators on this chip)"
-if chip_has_neural_accelerator; then
-  case "${METAL_TENSOR_API:-auto}" in
-    off)  TENSOR_STATE="off (forced)" ;;
-    *)    TENSOR_STATE="on (M5 Neural Accelerators, ~1.9x prefill)" ;;
-  esac
-elif [[ "${METAL_TENSOR_API:-auto}" == "on" ]]; then
-  TENSOR_STATE="on (forced on a chip without them)"
-fi
-log "  tensor API   $TENSOR_STATE"
 log ""
 log "  local URL    http://127.0.0.1:${PORT}/v1"
 if (( NEED_KEY )); then
@@ -301,7 +164,8 @@ log ""
 # ── launch ───────────────────────────────────────────────────────────────────
 if (( FOREGROUND )); then
   info "Starting in the foreground. Ctrl-C to stop."
-  exec "$LLAMA_BIN" "${ARGS[@]}"
+  # shellcheck disable=SC2086
+  exec "$ENGINE_BIN" $SERVE_WORD "${ARGS[@]}"
 fi
 
 # Record the effective config so ./restart.sh can report what changed.
@@ -315,7 +179,8 @@ fi
 
 # Detach fully: stdin from /dev/null so the child cannot hold the terminal
 # open, and all three fds redirected so a wrapper script returns immediately.
-nohup "$LLAMA_BIN" "${ARGS[@]}" </dev/null >>"$LOG_FILE" 2>&1 &
+# shellcheck disable=SC2086
+nohup "$ENGINE_BIN" $SERVE_WORD "${ARGS[@]}" </dev/null >>"$LOG_FILE" 2>&1 &
 SERVER_PID=$!
 disown "$SERVER_PID" 2>/dev/null || true
 echo "$SERVER_PID" > "$PID_FILE"

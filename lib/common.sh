@@ -117,14 +117,34 @@ MODEL_ALIASES="26b-q4 26b-a4b 12b 31b-heretic e4b e2b qwen-27b qwen-9b qwen-35b 
 # have - MTPLX packs say MTPLX, GGUF files say GGUF. An unrecognisable repo id
 # returns empty and the caller decides what to do about it.
 model_engine_for() {
+  local a
   case "$1" in
     # ── llama.cpp ──
-    26b-q4|26b-a4b|12b|31b-heretic|e4b|e2b|qwen-27b|qwen-9b|qwen-35b) echo gguf ;;
+    26b-q4|26b-a4b|12b|31b-heretic|e4b|e2b|qwen-27b|qwen-9b|qwen-35b) echo gguf; return 0 ;;
     # ── MLX / MTPLX ──
-    4bit|6bit|27b-3bit|27b-4bit|9b|moe)                              echo mlx  ;;
-    *MTPLX*|*mtplx*|*-4bit|*-6bit)                                   echo mlx  ;;
-    *GGUF*|*gguf*)                                                   echo gguf ;;
-    *)                                                               echo ""   ;;
+    4bit|6bit|27b-3bit|27b-4bit|9b|moe)                              echo mlx;  return 0 ;;
+  esac
+
+  # A repo id for a model we ship: resolve it through the alias table, because
+  # several registered repos do not say GGUF in their name - qwen-35b's is
+  # "HauhauCS/Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive" - and guessing
+  # from the name alone would leave them unclassified.
+  a="$(alias_for_repo "$1")"
+  if [[ -n "$a" ]]; then
+    case "$a" in
+      4bit|6bit|27b-3bit|27b-4bit|9b|moe) echo mlx  ;;
+      *)                                  echo gguf ;;
+    esac
+    return 0
+  fi
+
+  # An unregistered repo id: infer from the name. Best effort only - callers
+  # that have a directory should prefer engine_for_dir(), which looks at the
+  # contents instead of the name.
+  case "$1" in
+    *MTPLX*|*mtplx*)       echo mlx  ;;
+    *GGUF*|*gguf*)         echo gguf ;;
+    *)                     echo ""   ;;
   esac
 }
 
@@ -188,6 +208,18 @@ load_config() {
   THINKING_BUDGET_TOKENS=0
   MTP_DEPTH="auto"
   METAL_TENSOR_API="auto"
+  # MLX-only keys. Defaulted here so a trimmed env.conf still works on either
+  # engine; the GGUF engine simply never reads them.
+  PROFILE="sustained"
+  BATCHING_PRESET="agent"
+  SESSION_BANK_GB=8
+  MLX_CACHE_LIMIT_GB=0
+  PRESERVE_THINKING="scoped"
+  THINKING_NOVELTY_CLOSE=1
+  SSD_SESSION_CACHE="off"
+  STREAM_INTERVAL=1
+  RATE_LIMIT=0
+  NGRAM_PREWARM=0
   PREFILL_CHUNK_TOKENS=512
   BATCH_SIZE=2048
   UBATCH_SIZE=512
@@ -288,14 +320,50 @@ model_main_gguf() {
 # `set -o pipefail` a directory with no .gguf at all makes that pipeline fail,
 # which would abort the caller.
 model_dirs_on_disk() {
-  local dir
+  local dir eng
   for dir in "$MODELS_DIR"/*/; do
     [[ -d "$dir" ]] || continue
     dir="${dir%/}"
-    [[ -n "$(model_main_gguf "$dir" 2>/dev/null || true)" ]] || continue
+    eng="$(engine_for_dir "$dir")"
+    [[ -n "$eng" ]] || continue
     printf '%s\n' "$dir"
   done
   return 0
+}
+
+# Which engine owns this model directory, by looking at what is in it.
+# Empty when it holds no complete model of either kind.
+#
+# A directory belongs to exactly one engine, so the picker never has to guess
+# and the launcher never has to ask: the contents decide.
+engine_for_dir() {
+  local dir="$1" repo
+  repo="$(model_repo_from_dir "$dir")"
+  case "$(model_engine_for "$repo")" in
+    gguf) model_main_gguf "$dir" >/dev/null 2>&1 || true
+          [[ -n "$(model_main_gguf "$dir" 2>/dev/null || true)" ]] && echo gguf && return 0 ;;
+    mlx)  model_dir_ok "$dir" && echo mlx && return 0 ;;
+  esac
+  # Unknown repo id: fall back to sniffing the contents.
+  if [[ -n "$(model_main_gguf "$dir" 2>/dev/null || true)" ]]; then
+    echo gguf; return 0
+  fi
+  if model_dir_ok "$dir"; then echo mlx; return 0; fi
+  echo ""
+}
+
+# Size of a model directory in GB, whichever engine owns it.
+model_dir_size_gb() {
+  local dir="$1" eng mf
+  eng="$(engine_for_dir "$dir")"
+  if [[ "$eng" == "gguf" ]]; then
+    mf="$(model_main_gguf "$dir" 2>/dev/null || true)"
+    [[ -n "$mf" ]] && echo $(( $(stat -f%z "$mf" 2>/dev/null || echo 0) / 1000000000 )) || echo 0
+  elif [[ "$eng" == "mlx" ]]; then
+    model_dir_gb "$dir" 2>/dev/null || echo 0
+  else
+    echo 0
+  fi
 }
 
 # "owner--name" back to "owner/name". Only the FIRST separator is restored,
@@ -338,7 +406,7 @@ choose_model_on_disk() {
   [[ -t 0 ]] || return 1
 
   local default_dir="$MODELS_DIR/${MODEL_REPO//\//--}"
-  local default_idx=1 i=1 repo alias name mf size mark
+  local default_idx=1 i=1 repo alias name eng engc engup size mark
   for d in "${dirs[@]}"; do
     [[ "$d" == "$default_dir" ]] && default_idx=$i
     i=$(( i + 1 ))
@@ -347,16 +415,27 @@ choose_model_on_disk() {
   log ""
   log "  ${C_BOLD}Models on disk${C_RESET}   ${C_DIM}${#dirs[@]} downloaded - pick one to serve now${C_RESET}"
   log ""
+  printf '  %2s  %-5s %-12s %6s  %s\n' "#" "ENGINE" "ALIAS" "SIZE" ""
   i=1
   for d in "${dirs[@]}"; do
     repo="$(model_repo_from_dir "$d")"
     alias="$(alias_for_repo "$repo")"
     name="${alias:-${repo##*/}}"
-    mf="$(model_main_gguf "$d" 2>/dev/null || true)"
-    size=$(( ${#mf} ? $(stat -f%z "$mf" 2>/dev/null || echo 0) / 1000000000 : 0 ))
+    eng="$(engine_for_dir "$d")"
+    size="$(model_dir_size_gb "$d")"
+    # Colour the engine so the two are separable at a glance: amber for GGUF,
+    # violet for MLX, matching the badges used elsewhere in the project.
+    case "$eng" in
+      gguf) engc="$C_YELLOW" ;;
+      mlx)  engc="$C_BLUE"   ;;
+      *)    engc="$C_DIM"    ;;
+    esac
     mark=""
     (( i == default_idx )) && mark="${C_DIM}<- default${C_RESET}"
-    printf '  %2d  %-12s %3s GB  %s\n' "$i" "$name" "$size" "$mark"
+    # tr, not ${eng^^}: bash 3.2 ships on macOS and has no case conversion.
+    engup="$(printf '%s' "$eng" | tr '[:lower:]' '[:upper:]')"
+    printf '  %2d  %s%-5s%s %-12s %4s GB  %s\n' \
+      "$i" "$engc" "$engup" "$C_RESET" "$name" "$size" "$mark"
     i=$(( i + 1 ))
   done
   log ""
@@ -512,9 +591,85 @@ model_draft_gguf() {
 # Size of one model directory in GB, from the safetensors it holds. Returns
 # non-zero when the weights come to less than a gigabyte, which in practice
 # means the download did not finish.
+# KV cost per token in KB at f16, for the MLX engine's packs.
+#
+# NOTE: for Qwen this disagrees with the GGUF table above by about 4x, and the
+# disagreement is unresolved. The two projects modelled the same base models
+# differently - the GGUF table assumes full attention on every layer
+# (Qwen3.8-27B: 260 KB/token), the MLX table assumes a hybrid that caches KV on
+# a subset (64 KB/token). At least one of them is wrong, and a 4x error in this
+# number either wastes memory or invites an OOM.
+#
+# Both are kept verbatim so that neither engine's memory arithmetic changes
+# under the merge. Resolving it needs a measurement, not a guess: run a long
+# prompt on each engine and read the KV allocation out of the server log.
+kv_kb_per_token_f16_mlx() {
+  case "$1" in
+    # ~12 of 48 attention layers.
+    *Qwen3.6-35B*) echo 48  ;;
+    # 32 of 32 layers - dense, full attention on every layer.
+    *Qwen3.8-9B*)  echo 128 ;;
+    # 16 of 64 layers - every 27B build here (4bit/6bit/3bit, both owners).
+    *)             echo 64  ;;
+  esac
+}
+
+# KV KB/token at f16 for whichever engine serves this repo. The engine is
+# derived from the repo id, so existing callers keep working unchanged.
+kv_kb_per_token_f16() {
+  case "$(model_engine_for "$1")" in
+    mlx) kv_kb_per_token_f16_mlx "$1" ;;
+    *)   kv_kb_per_token_f16_gguf "$1" ;;
+  esac
+}
+
+# KV KB/token for one engine at one quant, ready for the memory arithmetic.
+kv_kb_for_engine() {
+  local eng="$1" kb
+  kb="$(kv_kb_per_token_f16 "$MODEL_REPO")"
+  case "$(kv_quant_for "$eng")" in
+    q8|q8_0)   kb=$(( kb / 2 )) ;;
+    q4|q4_0)   kb=$(( kb / 4 )) ;;
+  esac
+  echo "$kb"
+}
+
+# ── cross-engine value translation ───────────────────────────────────────────
+# env.conf holds one vocabulary; each engine has its own spelling for the same
+# idea. These are the translators, so a shared key never has to hold two values
+# and the user never has to remember which engine they are on.
+#
+# Legacy spellings (q8_0, q4_0) are accepted so an env.conf written before the
+# merge keeps working.
+
+# KV cache quant, in the engine's own spelling. $1 = engine.
+kv_quant_for() {
+  case "$1:${KV_QUANT:-q8}" in
+    gguf:q8|gguf:q8_0)   echo q8_0 ;;
+    gguf:q4|gguf:q4_0)   echo q4_0 ;;
+    gguf:f16|gguf:bf16)  echo f16  ;;
+    mlx:q8|mlx:q8_0)     echo q8   ;;
+    mlx:q4|mlx:q4_0)     echo q4   ;;
+    # MLX calls an unquantized cache "off" rather than "f16".
+    mlx:f16|mlx:off)     echo off  ;;
+    # Unknown value: pass it through and let the engine validate it, so the
+    # error message names the engine's vocabulary rather than ours.
+    *)                   echo "${KV_QUANT}" ;;
+  esac
+}
+
+# Prefill chunk size for the engine. "auto" resolves to each runtime's own
+# preferred value; a number is passed through untouched.
+prefill_chunk_for() {
+  case "${PREFILL_CHUNK_TOKENS:-auto}" in
+    auto|"") case "$1" in gguf) echo 512 ;; mlx) echo 2048 ;; *) echo 512 ;; esac ;;
+    *)       echo "$PREFILL_CHUNK_TOKENS" ;;
+  esac
+}
+
 model_dir_gb() {
   local bytes
-  bytes="$(find "$1" -name '*.safetensors' -type f \
+  bytes="$(find -L "$1" -name '*.safetensors' -type f \
             -exec stat -f%z {} + 2>/dev/null | awk '{n+=$1} END {print n+0}')"
   (( bytes > 1000000000 )) || return 1
   echo $(( bytes / 1000000000 ))
@@ -530,7 +685,9 @@ model_dir_gb() {
 model_dir_ok() {
   local dir="$1"
   [[ -d "$dir" ]] || return 1
-  find "$dir" -maxdepth 1 -name '*.safetensors' -type f 2>/dev/null \
+  # -L matters: without it a models/ entry that is a symlink to another volume
+  # is invisible, and the picker silently omits a model the user can see.
+  find -L "$dir" -maxdepth 1 -name '*.safetensors' -type f 2>/dev/null \
     | grep -q . || return 1
   [[ -f "$dir/model.safetensors.index.json" ]] || return 0
   python3 - "$dir" <<'PYEOF'
@@ -942,7 +1099,7 @@ kv_gb_for_context() {
 # of this table had no Qwen entries at all and fell through to a 64 KB default,
 # under-reporting the 27B by 4x and making a model that will not fit look
 # comfortable.
-kv_kb_per_token_f16() {
+kv_kb_per_token_f16_gguf() {
   case "$1" in
     # Gemma 4 - sliding-window attention, so growth is only the full layers.
     *q4_0-heretic*|*26B-A4B*) echo 20 ;;   # 5 of 30 layers full, 2 KV heads x 512

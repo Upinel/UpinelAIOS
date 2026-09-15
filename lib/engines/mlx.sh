@@ -47,7 +47,7 @@ engine_model_ok() {
 engine_main_file() {
   local dir="$1"
   [[ -d "$dir" ]] || return 0
-  find "$dir" -maxdepth 1 -name '*.safetensors' -type f 2>/dev/null | head -1
+  find -L "$dir" -maxdepth 1 -name '*.safetensors' -type f 2>/dev/null | head -1
 }
 
 engine_model_summary() {
@@ -72,7 +72,7 @@ engine_build_args() {
     --port "$PORT"
     --context-window "$CONTEXT_WINDOW"
     --max-tokens "$MAX_RESPONSE_TOKENS"
-    --paged-kv-quantization "$KV_QUANT"
+    --paged-kv-quantization "$(kv_quant_for mlx)"
     --batching-preset "$BATCHING_PRESET"
     --max-active-requests "$MAX_CONCURRENT"
     --stream-interval "$STREAM_INTERVAL"
@@ -92,7 +92,8 @@ engine_build_args() {
   (( ${RATE_LIMIT:-0} > 0 )) && ARGS+=( --rate-limit "$RATE_LIMIT" )
   ARGS+=( --preserve-thinking "$PRESERVE_THINKING" )
   [[ "$FAN_MODE" != "default" ]] && ARGS+=( --fan-mode "$FAN_MODE" )
-  (( PREFILL_CHUNK_TOKENS > 0 )) && ARGS+=( --prefill-chunk-tokens "$PREFILL_CHUNK_TOKENS" )
+  local chunk; chunk="$(prefill_chunk_for mlx)"
+  (( chunk > 0 )) && ARGS+=( --prefill-chunk-tokens "$chunk" )
 
   # shellcheck disable=SC2206
   ARGS+=( $THINKING_ARGS )
@@ -155,9 +156,10 @@ engine_apply_settings() {
     auto|on|off|scoped) ;;
     *) die "PRESERVE_THINKING=\"$PRESERVE_THINKING\" is not one of auto | on | off | scoped" ;;
   esac
-  case "$KV_QUANT" in
+  # Validate the TRANSLATED value, so the error names the engine's vocabulary.
+  case "$(kv_quant_for mlx)" in
     off|q8|q4) ;;
-    *) die "KV_QUANT=\"$KV_QUANT\" is not one of off | q8 | q4 (MLX engine)" ;;
+    *) die "KV_QUANT=\"$KV_QUANT\" is not a known cache type (MLX engine accepts q8 | q4 | f16)" ;;
   esac
 }
 
