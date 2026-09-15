@@ -57,6 +57,31 @@ case "$KV_QUANT" in q8_0|q4_0|f16|bf16) ;; *) die "KV_QUANT=\"$KV_QUANT\" is not
 thinking_level_ok "$THINKING" || die "THINKING=\"$THINKING\" is not one of off | minimal | low | high"
 case "$FAN_MODE" in default|smart|max) ;; *) die "FAN_MODE=\"$FAN_MODE\" is not one of default | smart | max" ;; esac
 
+# M5 neural accelerators, via llama.cpp's Metal 4 tensor API. llama.cpp reads
+# these at device init, so they must be in the environment of the server
+# process - hence export here rather than anywhere later.
+#
+# Measured on this M5 Pro, 8k prompt, cold: 1,374 t/s prefill with the tensor
+# API against 715 t/s without, and decode unchanged. It is a prefill win, and
+# prefill is what a cold agent turn waits on.
+case "${METAL_TENSOR_API:-auto}" in
+  auto) ;;
+  on)
+    if ! chip_has_neural_accelerator; then
+      warn "METAL_TENSOR_API=on, but this chip has no Neural Accelerators (M5 or later only)."
+      warn "llama.cpp measures the tensor API as ~5% SLOWER on M2 Ultra and neutral on M4."
+      warn "Leaving it on because you asked explicitly."
+    fi
+    export GGML_METAL_TENSOR_ENABLE=1
+    ;;
+  off)
+    export GGML_METAL_TENSOR_DISABLE=1
+    ;;
+  *)
+    die "METAL_TENSOR_API=\"$METAL_TENSOR_API\" is not one of auto | on | off"
+    ;;
+esac
+
 # ── which downloaded model to serve ──────────────────────────────────────────
 # Offered only when there is a real choice: more than one model on disk, a
 # terminal to answer on, and no --model. Anything else keeps env.conf's MODEL,
@@ -248,6 +273,20 @@ else
 fi
 log "  thinking     $THINKING"
 log "  vision       $([[ -n "$MMPROJ" ]] && echo "on" || echo "off")"
+
+# Say what the tensor API will actually be. "auto" resolves by chip, and the
+# answer differs between an M5 and an M3, so reporting the resolved state beats
+# reporting the setting.
+TENSOR_STATE="off (no Neural Accelerators on this chip)"
+if chip_has_neural_accelerator; then
+  case "${METAL_TENSOR_API:-auto}" in
+    off)  TENSOR_STATE="off (forced)" ;;
+    *)    TENSOR_STATE="on (M5 Neural Accelerators, ~1.9x prefill)" ;;
+  esac
+elif [[ "${METAL_TENSOR_API:-auto}" == "on" ]]; then
+  TENSOR_STATE="on (forced on a chip without them)"
+fi
+log "  tensor API   $TENSOR_STATE"
 log ""
 log "  local URL    http://127.0.0.1:${PORT}/v1"
 if (( NEED_KEY )); then

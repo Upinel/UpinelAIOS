@@ -100,6 +100,7 @@ Clone it, run `./install.sh`, run `./start.sh`. Nothing else.
 - [Benchmarks](#benchmarks)
   - [Measured throughput](#measured-throughput)
     - [How prefill behaves as context grows](#how-prefill-behaves-as-context-grows)
+    - [M5 Neural Accelerators: nearly 2x the prefill, free](#m5-neural-accelerators-nearly-2-the-prefill-free)
     - [On a smaller Mac](#on-a-smaller-mac)
   - [Measuring this yourself](#measuring-this-yourself)
     - [Tested and rejected](#tested-and-rejected)
@@ -618,6 +619,50 @@ has roughly a quarter of an M5 Pro's bandwidth. Order-of-magnitude:
 
 Even the pessimistic end is a usable agent endpoint, and `e2b` at 4.2 GB is the
 right pick for an 8 GB Air.
+
+#### M5 Neural Accelerators: nearly 2× the prefill, free
+
+Apple's **M5** puts a Neural Accelerator in every GPU core, reachable through
+the **Metal 4 tensor API**. llama.cpp uses it automatically on M5 and later, and
+because agents live and die on prefill — every cold session pays it before the
+model can do anything — this is one of the larger wins in the whole bundle.
+
+Measured here, 8,009-token prompt, cold first turn:
+
+| tensor API | prefill | time to first token |
+|---|---:|---:|
+| **on** (M5 default) | **1,376 t/s** | **5.82 s** |
+| off | 697 t/s | 11.48 s |
+
+**~1.97× prefill, and decode is untouched** (119 vs 115 t/s, which is inside
+run-to-run noise). It is a prefill win, not a decode one — worth being precise
+about, because "M5 is 2× faster" would be the wrong claim.
+
+`METAL_TENSOR_API` in `env.conf` controls it:
+
+| value | what happens |
+|---|---|
+| `auto` | llama.cpp decides — **on** for M5/M6/A19/A20, **off** everywhere else. Default. |
+| `on` | Force on. Warns on older chips. |
+| `off` | Force off, for A/B measurement or if a driver regresses. |
+
+**On M1–M4 this setting does nothing**, because those chips have no Neural
+Accelerators. That is not a limitation of this project: llama.cpp gates the
+tensor API by chip name precisely because its own measurements record it as
+**~5% slower on M2 Ultra** and neutral on M4/M4 Max. Forcing it on older silicon
+is a pessimisation, which is why `start.sh` warns if you try.
+
+`./start.sh` prints the resolved state rather than the setting, since "auto"
+means something different on an M5 than on an M3:
+
+```
+  tensor API   on (M5 Neural Accelerators, ~1.9x prefill)
+```
+
+> **The MLX project gets this too, automatically.** MTPLX's runtime ships
+> separate `nax` (Neural Accelerator) kernel variants — 21,660 `matmul2d` entries
+> in its metallib — and selects them by GPU architecture, with no setting to
+> flip. On the MLX side there is nothing to configure; it is already on.
 
 ### Measuring this yourself
 

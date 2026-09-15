@@ -138,6 +138,7 @@ load_config() {
   THINKING="off"
   THINKING_BUDGET_TOKENS=0
   MTP_DEPTH="auto"
+  METAL_TENSOR_API="auto"
   PREFILL_CHUNK_TOKENS=512
   BATCH_SIZE=2048
   UBATCH_SIZE=512
@@ -182,6 +183,20 @@ gpu_cores() {
 require_macos() {
   local v; v="$(macos_version)"; local major="${v%%.*}"
   (( major >= 14 )) || die "macOS $v detected. Apple Silicon inference needs macOS 14 or newer."
+}
+
+# Does this chip have Neural Accelerators in its GPU cores?
+#
+# M5 and later do; M1-M4 do not. It matters because llama.cpp exposes the
+# Metal 4 tensor API only where the hardware supports it, and gates it by chip
+# name for a reason: its own notes record the tensor API as ~5% SLOWER on
+# M2 Ultra and neutral on M4/M4 Max. Forcing it on older silicon is a
+# pessimisation, not an optimisation.
+chip_has_neural_accelerator() {
+  case "$(sysctl -n machdep.cpu.brand_string 2>/dev/null)" in
+    *" M5"*|*" M6"*|*" M7"*|*" M8"*|*" M9"*) return 0 ;;
+  esac
+  return 1
 }
 
 # Version of the llama.cpp runtime, or empty when it is not installed.
